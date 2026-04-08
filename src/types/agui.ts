@@ -61,7 +61,7 @@ export interface ErrorPayload {
 }
 
 export interface RunStartedPayload {
-  session_id?: string;
+  run_id?: string;
 }
 
 // ToolResult — generic format for SDK tool results

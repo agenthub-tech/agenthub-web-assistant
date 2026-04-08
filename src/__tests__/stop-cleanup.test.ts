@@ -14,18 +14,18 @@ function makeClient() {
   };
 }
 
-function makeSessionManager(sessionId: string | null = null) {
+function makeRunManager(runId: string | null = null) {
   const store: Record<string, string> = {};
-  if (sessionId) store['aa_session_id'] = sessionId;
+  if (runId) store['aa_run_id'] = runId;
   store['aa_task_state'] = 'some-state';
   store['aa_passive_nav'] = 'some-nav';
 
   return {
     cleared: false,
-    loadSessionId() { return store['aa_session_id'] ?? null; },
+    loadRunId() { return store['aa_run_id'] ?? null; },
     clear() {
       this.cleared = true;
-      delete store['aa_session_id'];
+      delete store['aa_run_id'];
       delete store['aa_task_state'];
       delete store['aa_passive_nav'];
     },
@@ -71,31 +71,31 @@ async function stopExecution(
   message: string,
   deps: {
     client: ReturnType<typeof makeClient>;
-    sessionManager: ReturnType<typeof makeSessionManager>;
+    runManager: ReturnType<typeof makeRunManager>;
     domHighlight: ReturnType<typeof makeDomHighlight>;
     virtualMouse: ReturnType<typeof makeVirtualMouse>;
     chatPanel: ReturnType<typeof makeChatPanel>;
     floatButton: ReturnType<typeof makeFloatButton>;
-    fetchDelete: (sessionId: string) => Promise<void>;
+    fetchDelete: (runId: string) => Promise<void>;
   }
 ): Promise<void> {
-  const { client, sessionManager, domHighlight, virtualMouse, chatPanel, floatButton, fetchDelete } = deps;
+  const { client, runManager, domHighlight, virtualMouse, chatPanel, floatButton, fetchDelete } = deps;
 
   // 1. disconnect SSE
   client.disconnect();
 
-  // 2. DELETE session
-  const sessionId = sessionManager.loadSessionId();
-  if (sessionId) {
+  // 2. DELETE run
+  const runId = runManager.loadRunId();
+  if (runId) {
     try {
-      await fetchDelete(sessionId);
+      await fetchDelete(runId);
     } catch {
       // ignore
     }
   }
 
   // 3. clear sessionStorage
-  sessionManager.clear();
+  runManager.clear();
 
   // 4. remove DOM overlays
   domHighlight.clear();
@@ -125,38 +125,38 @@ describe('Property 15: stop cleanup completeness', () => {
     // **Validates: Requirements 14.2, 14.3, 14.4, 14.5, 14.6, 15.4, 15.5**
     await fc.assert(
       fc.asyncProperty(
-        fc.string({ minLength: 1, maxLength: 64 }),  // session_id
+        fc.string({ minLength: 1, maxLength: 64 }),  // run_id
         fc.constantFrom('已停止', '检测到用户操作，已停止执行'),  // stop message
         fc.boolean(),  // whether DELETE fetch succeeds
-        async (sessionId, stopMessage, fetchSucceeds) => {
+        async (runId, stopMessage, fetchSucceeds) => {
           const client = makeClient();
-          const sessionManager = makeSessionManager(sessionId);
+          const runManager = makeRunManager(runId);
           const domHighlight = makeDomHighlight();
           const virtualMouse = makeVirtualMouse();
           const chatPanel = makeChatPanel();
           const floatButton = makeFloatButton();
 
           let deleteCalled = false;
-          let deletedSessionId = '';
+          let deletedRunId = '';
           const fetchDelete = async (sid: string) => {
             deleteCalled = true;
-            deletedSessionId = sid;
+            deletedRunId = sid;
             if (!fetchSucceeds) throw new Error('network error');
           };
 
           await stopExecution(stopMessage, {
-            client, sessionManager, domHighlight, virtualMouse, chatPanel, floatButton, fetchDelete,
+            client, runManager, domHighlight, virtualMouse, chatPanel, floatButton, fetchDelete,
           });
 
           // Req 14.2: SSE stream closed
           expect(client.disconnected).toBe(true);
 
-          // Req 14.3: DELETE session called with correct session_id
+          // Req 14.3: DELETE run called with correct run_id
           expect(deleteCalled).toBe(true);
-          expect(deletedSessionId).toBe(sessionId);
+          expect(deletedRunId).toBe(runId);
 
           // Req 14.4: sessionStorage cleared
-          expect(sessionManager.cleared).toBe(true);
+          expect(runManager.cleared).toBe(true);
 
           // Req 14.5: DOM overlays removed
           expect(domHighlight.cleared).toBe(true);
@@ -184,7 +184,7 @@ describe('Property 15: stop cleanup completeness', () => {
     // Simulate already-disconnected client (disconnect is idempotent)
     client.disconnected = true;
 
-    const sessionManager = makeSessionManager('existing-session');
+    const runManager = makeRunManager('existing-run');
     const domHighlight = makeDomHighlight();
     const virtualMouse = makeVirtualMouse();
     const chatPanel = makeChatPanel();
@@ -195,11 +195,11 @@ describe('Property 15: stop cleanup completeness', () => {
 
     // Should not throw
     await expect(
-      stopExecution('已停止', { client, sessionManager, domHighlight, virtualMouse, chatPanel, floatButton, fetchDelete })
+      stopExecution('已停止', { client, runManager, domHighlight, virtualMouse, chatPanel, floatButton, fetchDelete })
     ).resolves.toBeUndefined();
 
     // Cleanup steps 3-7 still executed
-    expect(sessionManager.cleared).toBe(true);
+    expect(runManager.cleared).toBe(true);
     expect(domHighlight.cleared).toBe(true);
     expect(virtualMouse.removed).toBe(true);
     expect(chatPanel.inputEnabled).toBe(true);
@@ -207,9 +207,9 @@ describe('Property 15: stop cleanup completeness', () => {
     expect(chatPanel.messages.at(-1)?.content).toBe('已停止');
   });
 
-  it('should skip DELETE fetch when no session_id is present', async () => {
+  it('should skip DELETE fetch when no run_id is present', async () => {
     const client = makeClient();
-    const sessionManager = makeSessionManager(null);  // no session_id
+    const runManager = makeRunManager(null);  // no run_id
     const domHighlight = makeDomHighlight();
     const virtualMouse = makeVirtualMouse();
     const chatPanel = makeChatPanel();
@@ -218,11 +218,11 @@ describe('Property 15: stop cleanup completeness', () => {
     let deleteCalled = false;
     const fetchDelete = async (_sid: string) => { deleteCalled = true; };
 
-    await stopExecution('已停止', { client, sessionManager, domHighlight, virtualMouse, chatPanel, floatButton, fetchDelete });
+    await stopExecution('已停止', { client, runManager, domHighlight, virtualMouse, chatPanel, floatButton, fetchDelete });
 
     expect(deleteCalled).toBe(false);
     // All other cleanup still happens
-    expect(sessionManager.cleared).toBe(true);
+    expect(runManager.cleared).toBe(true);
     expect(floatButton.state).toBe('closed');
   });
 });

@@ -24,7 +24,15 @@ export interface ChannelConfig {
   permission_scope: Record<string, unknown>;
 }
 
+export interface UserIdentity {
+  userId: string;
+  name?: string;
+  avatar?: string;
+  metadata?: Record<string, unknown>;
+}
+
 export interface InitOptions {
   channelKey: string;
   apiBase?: string;  // Override compiled-in API base URL
+  user?: UserIdentity;
 }

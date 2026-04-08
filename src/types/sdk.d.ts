@@ -24,7 +24,7 @@ declare module '@webaa/sdk' {
   export interface RunOptions {
     userInput: string;
     context?: Record<string, unknown>;
-    sessionId?: string;
+    runId?: string;
     toolResult?: Record<string, unknown>;
   }
 
@@ -49,7 +49,7 @@ declare module '@webaa/sdk' {
     disconnect(): void;
     get version(): string;
     get channelId(): string | null;
-    get sessionId(): string | null;
+    get runId(): string | null;
     get accessToken(): string | null;
     get apiBase(): string;
     get channelConfig(): ChannelConfig | null;

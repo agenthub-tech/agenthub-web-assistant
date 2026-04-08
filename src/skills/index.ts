@@ -6,7 +6,7 @@ import type { PageScanner } from '../executor/page-scanner';
 import type { DOMExecutor } from '../executor/dom-executor';
 import type { DOMHighlight } from '../executor/dom-highlight';
 import type { VirtualMouse } from '../executor/virtual-mouse';
-import type { SessionManager } from '../core/session-manager';
+import type { RunManager } from '../core/run-manager';
 
 // ── Skill Schemas (OpenAI function calling format) ──
 
@@ -140,7 +140,7 @@ export interface SkillExecutorDeps {
   domExecutor: DOMExecutor;
   domHighlight: DOMHighlight;
   virtualMouse: VirtualMouse;
-  sessionManager: SessionManager;
+  runManager: RunManager;
 }
 
 // ── Build Skill Definitions ──
@@ -150,7 +150,7 @@ export interface SkillExecutorDeps {
 // via registerBuiltinSkillHandlers().
 
 export function buildWebSkills(deps: SkillExecutorDeps): SkillDefinition[] {
-  const { pageScanner, domExecutor, domHighlight, virtualMouse, sessionManager } = deps;
+  const { pageScanner, domExecutor, domHighlight, virtualMouse, runManager } = deps;
 
   return [
     // 1. PageSkill
@@ -201,9 +201,9 @@ export function buildWebSkills(deps: SkillExecutorDeps): SkillDefinition[] {
 
         const beforeunloadHandler = () => {
           beforeunloadFired = true;
-          const sessionId = sessionManager.loadSessionId();
+          const runId = runManager.loadRunId();
           sessionStorage.setItem('aa_passive_nav', JSON.stringify({
-            session_id: sessionId,
+            run_id: runId,
             tool_call_id: (params as any)._tool_call_id ?? '',
             action,
           }));
@@ -252,9 +252,9 @@ export function buildWebSkills(deps: SkillExecutorDeps): SkillDefinition[] {
       execute: async (params) => {
         const url = params.url as string;
 
-        const sessionId = sessionManager.loadSessionId();
+        const runId = runManager.loadRunId();
         sessionStorage.setItem('aa_passive_nav', JSON.stringify({
-          session_id: sessionId,
+          run_id: runId,
           tool_call_id: (params as any)._tool_call_id ?? '',
           action: 'navigate',
         }));

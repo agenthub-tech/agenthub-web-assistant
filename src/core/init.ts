@@ -11,7 +11,7 @@ import { ChatPanel } from '../ui/chat-panel';
 import { StepTracker } from '../ui/step-tracker';
 import { ConfirmDialog } from '../ui/confirm-dialog';
 import { TaskBorder } from '../ui/task-border';
-import { SessionManager } from './session-manager';
+import { RunManager } from './run-manager';
 import { buildWebSkills, registerBuiltinSkillHandlers } from '../skills';
 import { registerSDKEventHandlers } from '../event-handler';
 import type { ChannelConfig, InitOptions } from '../types/channel';
@@ -27,6 +27,12 @@ const DEFAULT_CONFIG: ChannelConfig = {
   permission_scope: {},
 };
 
+let _sdkInstance: WebAASDK | null = null;
+
+export function getSDKInstance(): WebAASDK | null {
+  return _sdkInstance;
+}
+
 export async function init(options: InitOptions): Promise<void> {
   const { channelKey } = options;
   const apiBase = options.apiBase ?? __AA_API_BASE__;
@@ -37,17 +43,27 @@ export async function init(options: InitOptions): Promise<void> {
   const domHighlight = new DOMHighlight(pageScanner);
   const virtualMouse = new VirtualMouse();
   const taskBorder = new TaskBorder();
-  const sessionManager = new SessionManager();
+  const runManager = new RunManager();
 
   // 2. Build Web-specific Skills
   const webSkills = buildWebSkills({
-    pageScanner, domExecutor, domHighlight, virtualMouse, sessionManager,
+    pageScanner, domExecutor, domHighlight, virtualMouse, runManager,
   });
 
   // 3. Initialize JS SDK — handles token, config fetch, and skill registration
   const sdk = new WebAASDK();
   try {
-    await sdk.init({ channelKey, skills: webSkills, apiBase });
+    await sdk.init({
+      channelKey,
+      skills: webSkills,
+      apiBase,
+      user: options.user ? {
+        userId: options.user.userId,
+        name: options.user.name,
+        avatar: options.user.avatar,
+        metadata: options.user.metadata,
+      } : undefined,
+    });
   } catch (err) {
     console.error('[AA Web Assistant] SDK init failed:', err);
     // Show error in a minimal chat panel
@@ -57,6 +73,9 @@ export async function init(options: InitOptions): Promise<void> {
     chatPanel.setMessageState(errId, 'error');
     return;
   }
+
+  // Store SDK instance for external access (e.g. AA.identify)
+  _sdkInstance = sdk;
 
   // 4. Build channel config from SDK's fetched config (fallback to defaults)
   const rawConfig = sdk.channelConfig;
@@ -95,7 +114,7 @@ export async function init(options: InitOptions): Promise<void> {
   // 7. Register AG-UI event handlers for UI updates
   registerSDKEventHandlers({
     sdk, chatPanel, stepTracker, confirmDialog, domHighlight,
-    virtualMouse, pageScanner, domExecutor, sessionManager, floatButton, taskBorder,
+    virtualMouse, pageScanner, domExecutor, runManager, floatButton, taskBorder,
   });
 
   // 8. ChatPanel onSend: scan page, call sdk.run() with Web context
@@ -111,7 +130,7 @@ export async function init(options: InitOptions): Promise<void> {
 
     wireEmitterToUI(emitter, {
       chatPanel, stepTracker, confirmDialog, domHighlight, virtualMouse,
-      pageScanner, sessionManager, floatButton, taskBorder, sdk,
+      pageScanner, runManager, floatButton, taskBorder, sdk,
     });
   });
 
@@ -120,7 +139,7 @@ export async function init(options: InitOptions): Promise<void> {
   if (passiveNavRaw) {
     try {
       const passiveNav = JSON.parse(passiveNavRaw) as {
-        session_id: string | null;
+        run_id: string | null;
         tool_call_id: string;
         action: string;
       };
@@ -132,7 +151,7 @@ export async function init(options: InitOptions): Promise<void> {
       const emitter = sdk.run({
         userInput: '',
         context: { dom_snapshot: elements, current_url: window.location.href },
-        sessionId: passiveNav.session_id ?? undefined,
+        runId: passiveNav.run_id ?? undefined,
         toolResult: {
           tool_call_id: passiveNav.tool_call_id,
           result: {
@@ -144,13 +163,13 @@ export async function init(options: InitOptions): Promise<void> {
 
       wireEmitterToUI(emitter, {
         chatPanel, stepTracker, confirmDialog, domHighlight, virtualMouse,
-        pageScanner, sessionManager, floatButton, taskBorder, sdk,
+        pageScanner, runManager, floatButton, taskBorder, sdk,
       });
     } catch {
       sessionStorage.removeItem('aa_passive_nav');
     }
-  } else if (sessionManager.hasTask()) {
-    sessionManager.clear();
+  } else if (runManager.hasTask()) {
+    runManager.clear();
   }
 }
 
@@ -163,7 +182,7 @@ interface WireDeps {
   domHighlight: DOMHighlight;
   virtualMouse: VirtualMouse;
   pageScanner: PageScanner;
-  sessionManager: SessionManager;
+  runManager: RunManager;
   floatButton: FloatButton;
   taskBorder: TaskBorder;
   sdk: WebAASDK;
@@ -175,7 +194,7 @@ function wireEmitterToUI(
 ): void {
   const {
     chatPanel, stepTracker, domHighlight, virtualMouse,
-    sessionManager, floatButton, taskBorder, sdk,
+    runManager, floatButton, taskBorder, sdk,
   } = deps;
 
   let currentMsgId: string | null = null;
@@ -183,7 +202,7 @@ function wireEmitterToUI(
   const shownDialogMessages = new Set<string>();
 
   emitter.on('RunStarted', (event: any) => {
-    if (event.payload?.session_id) sessionManager.saveSessionId(event.payload.session_id);
+    if (event.payload?.run_id) runManager.saveRunId(event.payload.run_id);
     stopped = false;
     stepTracker.clear();
     currentMsgId = null;
@@ -197,7 +216,7 @@ function wireEmitterToUI(
     domHighlight.clear();
     virtualMouse.remove();
     taskBorder.hide();
-    sessionManager.clear();
+    runManager.clear();
     chatPanel.setInputEnabled(true);
     chatPanel.hideStopButton();
     floatButton.setState('closed');
@@ -246,7 +265,7 @@ function wireEmitterToUI(
   });
 
   emitter.on('StateSnapshotEvent', (event: any) => {
-    sessionManager.save(event.payload);
+    runManager.save(event.payload);
   });
 
   emitter.on('error', (event: any) => {
@@ -254,7 +273,7 @@ function wireEmitterToUI(
     const errId = chatPanel.addMessage('assistant', 'error');
     chatPanel.appendDelta(errId, typeof message === 'string' ? message : String(message));
     chatPanel.setMessageState(errId, 'error');
-    sessionManager.clear();
+    runManager.clear();
     chatPanel.setInputEnabled(true);
     chatPanel.hideStopButton();
     floatButton.setState('closed');
@@ -266,17 +285,17 @@ function wireEmitterToUI(
     stopped = true;
     sdk.disconnect();
 
-    const sessionId = sessionManager.loadSessionId();
-    if (sessionId && sdk.accessToken) {
+    const runId = runManager.loadRunId();
+    if (runId && sdk.accessToken) {
       try {
-        await fetch(`${sdk.apiBase}/api/agent/session/${encodeURIComponent(sessionId)}`, {
+        await fetch(`${sdk.apiBase}/api/agent/run/${encodeURIComponent(runId)}`, {
           method: 'DELETE',
           headers: { 'Authorization': `Bearer ${sdk.accessToken}` },
         });
       } catch { /* ignore */ }
     }
 
-    sessionManager.clear();
+    runManager.clear();
     domHighlight.clear();
     virtualMouse.remove();
     taskBorder.hide();
