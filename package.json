@@ -1,0 +1,44 @@
+{
+  "name": "@webaa/web-assistant",
+  "version": "1.0.0",
+  "description": "WebAA Web Assistant - Web embedded assistant built on JS SDK",
+  "main": "dist/aa.js",
+  "module": "dist/aa.esm.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/aa.esm.js",
+      "require": "./dist/aa.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "node build.mjs && npx tsc --emitDeclarationOnly --declaration --outDir dist",
+    "test": "vitest --run",
+    "test:watch": "vitest",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "webaa",
+    "web-assistant",
+    "ai",
+    "assistant",
+    "chatbot"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "@webaa/sdk": "file:../../sdks/js"
+  },
+  "devDependencies": {
+    "@vitest/coverage-v8": "^1.0.0",
+    "esbuild": "^0.20.0",
+    "events": "^3.3.0",
+    "fast-check": "^3.0.0",
+    "jsdom": "^24.0.0",
+    "typescript": "^5.0.0",
+    "vitest": "^1.0.0"
+  }
+}
