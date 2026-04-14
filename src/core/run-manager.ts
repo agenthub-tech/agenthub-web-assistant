@@ -4,6 +4,7 @@
 const TASK_STATE_KEY = 'aa_task_state';
 const RUN_ID_KEY = 'aa_run_id';
 const PASSIVE_NAV_KEY = 'aa_passive_nav';
+const THREAD_ID_KEY = 'aa_thread_id';
 
 export class RunManager {
   /** JSON.stringify 后写入 sessionStorage */
@@ -24,11 +25,12 @@ export class RunManager {
     }
   }
 
-  /** 删除 sessionStorage['aa_task_state']、'aa_run_id'、'aa_passive_nav' */
+  /** 删除 sessionStorage['aa_task_state']、'aa_run_id'、'aa_passive_nav'、'aa_thread_id' */
   clear(): void {
     sessionStorage.removeItem(TASK_STATE_KEY);
     sessionStorage.removeItem(RUN_ID_KEY);
     sessionStorage.removeItem(PASSIVE_NAV_KEY);
+    sessionStorage.removeItem(THREAD_ID_KEY);
   }
 
   /** 检查 key 存在且值可被 JSON.parse 解析 */
@@ -56,5 +58,20 @@ export class RunManager {
   /** 删除 sessionStorage['aa_run_id'] */
   clearRunId(): void {
     sessionStorage.removeItem(RUN_ID_KEY);
+  }
+
+  /** 写入 sessionStorage['aa_thread_id'] */
+  saveThreadId(threadId: string): void {
+    sessionStorage.setItem(THREAD_ID_KEY, threadId);
+  }
+
+  /** 读取 sessionStorage['aa_thread_id']，不存在时返回 null */
+  loadThreadId(): string | null {
+    return sessionStorage.getItem(THREAD_ID_KEY);
+  }
+
+  /** 删除 sessionStorage['aa_thread_id'] */
+  clearThreadId(): void {
+    sessionStorage.removeItem(THREAD_ID_KEY);
   }
 }

@@ -159,6 +159,7 @@ export function buildWebSkills(deps: SkillExecutorDeps): SkillDefinition[] {
       schema: PAGE_SKILL_SCHEMA,
       promptInjection: PAGE_SKILL_PROMPT,
       executionMode: 'sdk',
+      cache: { enabled: true, ttl: 30000, mode: 'snapshot', invalidateOn: ['urlchange', 'dom:mutation'] },
       execute: async (_params) => {
         const { elements, truncated } = pageScanner.scan();
         return { dom_snapshot: elements, truncated };
@@ -171,6 +172,7 @@ export function buildWebSkills(deps: SkillExecutorDeps): SkillDefinition[] {
       schema: DOM_SKILL_SCHEMA,
       promptInjection: DOM_SKILL_PROMPT,
       executionMode: 'sdk',
+      cache: { enabled: false, ttl: 0, mode: 'none' },
       execute: async (params) => {
         const action = params.action as string;
         const el_id = params.el_id as string;
@@ -249,6 +251,7 @@ export function buildWebSkills(deps: SkillExecutorDeps): SkillDefinition[] {
       schema: NAVIGATION_SKILL_SCHEMA,
       promptInjection: NAVIGATION_SKILL_PROMPT,
       executionMode: 'sdk',
+      cache: { enabled: false, ttl: 0, mode: 'none' },
       execute: async (params) => {
         const url = params.url as string;
 
@@ -269,6 +272,7 @@ export function buildWebSkills(deps: SkillExecutorDeps): SkillDefinition[] {
       name: 'clipboard_skill',
       schema: CLIPBOARD_SKILL_SCHEMA,
       executionMode: 'sdk',
+      cache: { enabled: true, ttl: 0, mode: 'append' },
       execute: async (params) => {
         const action = params.action as string;
         const content = params.content as string | undefined;

@@ -67,7 +67,7 @@ describe('ChatPanel — 基础结构 (14.1)', () => {
     const textarea = panel.getElement().querySelector('textarea') as HTMLTextAreaElement;
     textarea.value = 'hello';
     textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
-    expect(handler).toHaveBeenCalledWith('hello');
+    expect(handler).toHaveBeenCalledWith('hello', undefined);
   });
 });
 
@@ -165,7 +165,7 @@ describe('ChatPanel — 消息气泡管理 (14.2)', () => {
         (deltas) => {
           const p = makePanel();
           p.show();
-          const id = p.addMessage('assistant', 'streaming');
+          const id = p.addMessage('user', 'streaming');
           for (const d of deltas) p.appendDelta(id, d);
           const wrapper = p.getMessageListEl().lastElementChild as HTMLElement;
           const contentEl = wrapper.querySelector('[data-aa-content]') as HTMLElement;
@@ -186,7 +186,7 @@ describe('ChatPanel — 消息气泡管理 (14.2)', () => {
         (deltas) => {
           const p = makePanel();
           p.show();
-          const id = p.addMessage('assistant', 'streaming');
+          const id = p.addMessage('user', 'streaming');
           for (const d of deltas) p.appendDelta(id, d);
           p.setMessageState(id, 'done');
           const wrapper = p.getMessageListEl().lastElementChild as HTMLElement;
@@ -215,7 +215,7 @@ describe('ChatPanel — 用户输入与发送逻辑 (14.3)', () => {
     const textarea = panel.getElement().querySelector('textarea') as HTMLTextAreaElement;
     textarea.value = 'test message';
     textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
-    expect(handler).toHaveBeenCalledWith('test message');
+    expect(handler).toHaveBeenCalledWith('test message', undefined);
   });
 
   it('发送后清空输入框', () => {
@@ -233,7 +233,7 @@ describe('ChatPanel — 用户输入与发送逻辑 (14.3)', () => {
     textarea.value = 'click send';
     const sendBtn = panel.getElement().querySelector('button[aria-label="发送"]') as HTMLButtonElement;
     sendBtn.click();
-    expect(handler).toHaveBeenCalledWith('click send');
+    expect(handler).toHaveBeenCalledWith('click send', undefined);
   });
 
   it('Shift+Enter 插入换行，不触发发送', () => {

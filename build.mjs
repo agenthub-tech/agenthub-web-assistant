@@ -1,5 +1,6 @@
 import * as esbuild from 'esbuild';
 import path from 'path';
+import fs from 'fs';
 import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -21,12 +22,11 @@ const common = {
   nodePaths: [path.resolve(__dirname, 'node_modules')],
 };
 
-// IIFE bundle — for <script> tag usage (window.AA)
+// IIFE bundle — for <script> tag usage (window.AA set inside code)
 await esbuild.build({
   ...common,
   outfile: 'dist/aa.js',
   format: 'iife',
-  globalName: 'AA',
   minify: false,
 });
 
@@ -43,9 +43,15 @@ await esbuild.build({
   ...common,
   outfile: 'dist/aa.min.js',
   format: 'iife',
-  globalName: 'AA',
   minify: true,
   sourcemap: false,
 });
 
 console.log('Build complete: dist/aa.js (iife) | dist/aa.esm.js (esm) | dist/aa.min.js (minified)');
+
+// Copy standalone type declaration for third-party integration
+fs.copyFileSync(
+  path.resolve(__dirname, 'src/aa.d.ts'),
+  path.resolve(__dirname, 'dist/aa.d.ts'),
+);
+console.log('Copied: dist/aa.d.ts (standalone type declarations)');

@@ -117,15 +117,33 @@ export async function init(options: InitOptions): Promise<void> {
     virtualMouse, pageScanner, domExecutor, runManager, floatButton, taskBorder,
   });
 
+  // 7.5. L1 Cache invalidation: listen for URL changes
+  let lastUrl = window.location.href;
+  const urlObserver = new MutationObserver(() => {
+    if (window.location.href !== lastUrl) {
+      lastUrl = window.location.href;
+      sdk.invalidateCache('urlchange');
+    }
+  });
+  urlObserver.observe(document.body, { childList: true, subtree: true });
+  window.addEventListener('popstate', () => {
+    if (window.location.href !== lastUrl) {
+      lastUrl = window.location.href;
+      sdk.invalidateCache('urlchange');
+    }
+  });
+
   // 8. ChatPanel onSend: scan page, call sdk.run() with Web context
-  chatPanel.onSend((userInput: string) => {
+  chatPanel.onSend((userInput: string, files?: File[]) => {
     const { elements } = pageScanner.scan();
-    chatPanel.addMessage('user', 'done', userInput);
+
+    chatPanel.addMessage('user', 'done', userInput, files);
     chatPanel.setInputEnabled(false);
 
     const emitter = sdk.run({
       userInput,
       context: { dom_snapshot: elements, current_url: window.location.href },
+      files,
     });
 
     wireEmitterToUI(emitter, {
@@ -134,9 +152,108 @@ export async function init(options: InitOptions): Promise<void> {
     });
   });
 
+  // 8.5. Thread list: new thread + switch thread + auto-load on toggle
+  // Enable thread list button after identify() is called
+  if (sdk.userId) {
+    chatPanel.enableThreadList();
+  }
+  sdk.onIdentify(() => {
+    chatPanel.enableThreadList();
+  });
+
+  // 8.6. Reset (logout): clear UI, hide thread list
+  sdk.onReset(() => {
+    runManager.clear();
+    chatPanel.clearMessages();
+    chatPanel.hideThreadList();
+    chatPanel.disableThreadList();
+    chatPanel.setInputEnabled(true);
+    chatPanel.hideStopButton();
+    floatButton.setState('closed');
+    stepTracker.clear();
+    domHighlight.clear();
+    virtualMouse.remove();
+    taskBorder.hide();
+
+    const welcomeMsg = config.theme.chat_panel?.welcome_message;
+    if (welcomeMsg) {
+      chatPanel.addMessage('assistant', 'done', welcomeMsg);
+    }
+  });
+
+  const loadAndRenderThreads = async () => {
+    try {
+      const threads = await sdk.listThreads();
+      chatPanel.setActiveThreadId(sdk.threadId);
+      chatPanel.renderThreadList(threads as Array<{
+        id: string; title: string | null; message_count: number; updated_at: string;
+      }>);
+    } catch {
+      chatPanel.renderThreadList([]);
+    }
+  };
+
+  chatPanel.onToggleThreadList(() => {
+    loadAndRenderThreads();
+  });
+
+  chatPanel.onNewThread(async () => {
+    try {
+      sdk.disconnect();
+      runManager.clear();
+      chatPanel.clearMessages();
+      chatPanel.setInputEnabled(true);
+      chatPanel.hideStopButton();
+      floatButton.setState('closed');
+      stepTracker.clear();
+      domHighlight.clear();
+      virtualMouse.remove();
+      taskBorder.hide();
+
+      await sdk.newThread();
+      chatPanel.setActiveThreadId(sdk.threadId);
+      if (sdk.threadId) runManager.saveThreadId(sdk.threadId);
+
+      const welcomeMsg = config.theme.chat_panel?.welcome_message;
+      if (welcomeMsg) {
+        chatPanel.addMessage('assistant', 'done', welcomeMsg);
+      }
+    } catch (err) {
+      console.error('[AA] New thread failed:', err);
+    }
+  });
+
+  chatPanel.onSwitchThread(async (threadId: string) => {
+    try {
+      sdk.disconnect();
+      runManager.clear();
+      chatPanel.clearMessages();
+      chatPanel.setInputEnabled(true);
+      chatPanel.hideStopButton();
+      floatButton.setState('closed');
+      stepTracker.clear();
+      domHighlight.clear();
+      virtualMouse.remove();
+      taskBorder.hide();
+
+      const threadData = await sdk.switchThread(threadId);
+      chatPanel.setActiveThreadId(threadId);
+      runManager.saveThreadId(threadId);
+
+      // Render history messages
+      renderThreadHistory(threadData, chatPanel, stepTracker);
+    } catch (err) {
+      console.error('[AA] Switch thread failed:', err);
+      const errId = chatPanel.addMessage('assistant', 'error');
+      chatPanel.appendDelta(errId, `切换会话失败：${err instanceof Error ? err.message : String(err)}`);
+      chatPanel.setMessageState(errId, 'error');
+    }
+  });
+
   // 9. Check sessionStorage for cross-page navigation resume
   const passiveNavRaw = sessionStorage.getItem('aa_passive_nav');
   if (passiveNavRaw) {
+    let resumed = false;
     try {
       const passiveNav = JSON.parse(passiveNavRaw) as {
         run_id: string | null;
@@ -145,31 +262,98 @@ export async function init(options: InitOptions): Promise<void> {
       };
       sessionStorage.removeItem('aa_passive_nav');
 
-      const { elements } = pageScanner.scan();
-      chatPanel.show();
+      // Only attempt resume if we have a valid run_id and tool_call_id
+      if (passiveNav.run_id && passiveNav.tool_call_id) {
+        const { elements } = pageScanner.scan();
+        chatPanel.show();
 
-      const emitter = sdk.run({
-        userInput: '',
-        context: { dom_snapshot: elements, current_url: window.location.href },
-        runId: passiveNav.run_id ?? undefined,
-        toolResult: {
-          tool_call_id: passiveNav.tool_call_id,
-          result: {
-            success: true, navigated: true,
-            new_url: window.location.href, dom_snapshot: elements,
+        const emitter = sdk.run({
+          userInput: '',
+          context: { dom_snapshot: elements, current_url: window.location.href },
+          runId: passiveNav.run_id,
+          toolResult: {
+            tool_call_id: passiveNav.tool_call_id,
+            result: {
+              success: true, navigated: true,
+              new_url: window.location.href, dom_snapshot: elements,
+            },
           },
-        },
-      });
+        });
 
-      wireEmitterToUI(emitter, {
-        chatPanel, stepTracker, confirmDialog, domHighlight, virtualMouse,
-        pageScanner, runManager, floatButton, taskBorder, sdk,
-      });
+        wireEmitterToUI(emitter, {
+          chatPanel, stepTracker, confirmDialog, domHighlight, virtualMouse,
+          pageScanner, runManager, floatButton, taskBorder, sdk,
+        }, async () => {
+          // Run expired — gracefully fall back to thread history
+          await restoreThreadHistory(sdk, runManager, chatPanel, stepTracker);
+        });
+        resumed = true;
+      }
     } catch {
       sessionStorage.removeItem('aa_passive_nav');
     }
+
+    // Fallback: if resume was skipped (missing run_id/tool_call_id), restore thread history
+    if (!resumed) {
+      await restoreThreadHistory(sdk, runManager, chatPanel, stepTracker);
+    }
   } else if (runManager.hasTask()) {
     runManager.clear();
+  } else {
+    // 10. Restore previous thread history on page refresh
+    await restoreThreadHistory(sdk, runManager, chatPanel, stepTracker);
+  }
+}
+
+// ── Restore thread history from sessionStorage ──
+
+async function restoreThreadHistory(
+  sdk: WebAASDK,
+  runManager: RunManager,
+  chatPanel: ChatPanel,
+  stepTracker: StepTracker,
+): Promise<void> {
+  const savedThreadId = runManager.loadThreadId();
+  if (!savedThreadId) return;
+  try {
+    const threadData = await sdk.switchThread(savedThreadId);
+    chatPanel.setActiveThreadId(savedThreadId);
+    renderThreadHistory(threadData, chatPanel, stepTracker);
+  } catch {
+    runManager.clearThreadId();
+  }
+}
+
+// ── Render thread history messages into UI ──
+
+function renderThreadHistory(
+  threadData: Record<string, unknown>,
+  chatPanel: ChatPanel,
+  stepTracker: StepTracker,
+): void {
+  const messages = (threadData.messages ?? []) as Array<{
+    role: string;
+    content?: string;
+    name?: string;
+    summary?: string;
+    tool_call_id?: string;
+    steps?: Array<{ id: string; name: string; summary: string }>;
+  }>;
+  for (const msg of messages) {
+    if (msg.role === 'user' && msg.content) {
+      chatPanel.addMessage('user', 'done', msg.content);
+    } else if (msg.role === 'assistant' && msg.content) {
+      chatPanel.addMessage('assistant', 'done', msg.content);
+    } else if (msg.role === 'tool_call' && msg.name) {
+      const params = msg.summary ? { step_description: msg.summary } : undefined;
+      stepTracker.addStep(msg.tool_call_id ?? msg.name, msg.name, params);
+      stepTracker.completeStep(msg.tool_call_id ?? msg.name);
+    } else if (msg.role === 'tool_steps' && msg.steps) {
+      for (const step of msg.steps) {
+        stepTracker.addStep(step.id, step.name, step.summary ? { step_description: step.summary } : undefined);
+        stepTracker.completeStep(step.id);
+      }
+    }
   }
 }
 
@@ -191,6 +375,7 @@ interface WireDeps {
 function wireEmitterToUI(
   emitter: { on: (event: string, handler: (...args: any[]) => void) => void },
   deps: WireDeps,
+  onRunExpired?: () => void,
 ): void {
   const {
     chatPanel, stepTracker, domHighlight, virtualMouse,
@@ -203,8 +388,8 @@ function wireEmitterToUI(
 
   emitter.on('RunStarted', (event: any) => {
     if (event.payload?.run_id) runManager.saveRunId(event.payload.run_id);
+    if (event.payload?.thread_id) runManager.saveThreadId(event.payload.thread_id);
     stopped = false;
-    stepTracker.clear();
     currentMsgId = null;
     floatButton.setState('running');
     chatPanel.showStopButton();
@@ -270,8 +455,22 @@ function wireEmitterToUI(
 
   emitter.on('error', (event: any) => {
     const message = event?.payload?.message ?? event?.message ?? 'Unknown error';
+    const msgStr = typeof message === 'string' ? message : String(message);
+
+    // If the run expired/not found and caller provided a fallback, use it silently
+    if (onRunExpired && /run.*(not found|expired|not exist)/i.test(msgStr)) {
+      // Only clear run state, preserve threadId for history restoration
+      runManager.clearRunId();
+      chatPanel.setInputEnabled(true);
+      chatPanel.hideStopButton();
+      floatButton.setState('closed');
+      taskBorder.hide();
+      onRunExpired();
+      return;
+    }
+
     const errId = chatPanel.addMessage('assistant', 'error');
-    chatPanel.appendDelta(errId, typeof message === 'string' ? message : String(message));
+    chatPanel.appendDelta(errId, msgStr);
     chatPanel.setMessageState(errId, 'error');
     runManager.clear();
     chatPanel.setInputEnabled(true);
