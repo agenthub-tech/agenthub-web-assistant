@@ -30,7 +30,7 @@
   ],
   "license": "MIT",
   "dependencies": {
-    "@webaa/sdk": "file:../../sdks/js",
+    "agenthub-sdk": "git+https://gogsit.sinocare.com/agenthub/agenthub-sdk-js.git",
     "echarts": "^5.5.0"
   },
   "devDependencies": {
