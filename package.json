@@ -1,7 +1,7 @@
 {
-  "name": "@webaa/web-assistant",
+  "name": "agenthub-web-assistant",
   "version": "1.0.0",
-  "description": "WebAA Web Assistant - Web embedded assistant built on JS SDK",
+  "description": "AgentHub Web Assistant - Web embedded assistant built on JS SDK",
   "main": "dist/aa.js",
   "module": "dist/aa.esm.js",
   "types": "dist/index.d.ts",
@@ -17,12 +17,13 @@
   ],
   "scripts": {
     "build": "node build.mjs && npx tsc --emitDeclarationOnly --declaration --outDir dist",
+    "prepare": "npm run build",
     "test": "vitest --run",
     "test:watch": "vitest",
     "prepublishOnly": "npm run build"
   },
   "keywords": [
-    "webaa",
+    "agenthub",
     "web-assistant",
     "ai",
     "assistant",
