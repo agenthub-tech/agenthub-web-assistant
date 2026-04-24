@@ -1,7 +1,7 @@
 // Web-specific Skill definitions for registration with the JS SDK
 // Requirements: 10.1, 10.2, 11.1, 11.2, 11.3, 11.4
 
-import type { SkillDefinition } from '@webaa/sdk';
+import type { SkillDefinition } from 'agenthub-sdk';
 import type { PageScanner } from '../executor/page-scanner';
 import type { DOMExecutor } from '../executor/dom-executor';
 import type { DOMHighlight } from '../executor/dom-highlight';

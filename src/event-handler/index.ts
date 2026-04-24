@@ -2,7 +2,7 @@
 // Built on top of JS SDK's EventEmitter pattern
 // Requirements: 10.2, 10.3, 10.4
 
-import type { WebAASDK } from '@webaa/sdk';
+import type { WebAASDK } from 'agenthub-sdk';
 import type { ChatPanel } from '../ui/chat-panel';
 import type { StepTracker } from '../ui/step-tracker';
 import type { ConfirmDialog } from '../ui/confirm-dialog';

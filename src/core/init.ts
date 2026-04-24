@@ -1,7 +1,7 @@
 // Web Assistant initialization — built on top of JS SDK
 // Requirements: 10.1, 10.2, 10.3, 10.5, 11.1, 11.2, 11.3, 11.4
 
-import { WebAASDK } from '@webaa/sdk';
+import { WebAASDK } from 'agenthub-sdk';
 import { PageScanner } from '../executor/page-scanner';
 import { DOMExecutor } from '../executor/dom-executor';
 import { DOMHighlight } from '../executor/dom-highlight';

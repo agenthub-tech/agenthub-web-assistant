@@ -15,10 +15,7 @@ const common = {
   define: {
     __AA_API_BASE__: JSON.stringify(API_BASE_URL),
   },
-  alias: {
-    '@webaa/sdk': path.resolve(__dirname, '../../sdks/js/src/index.ts'),
-  },
-  // Resolve node_modules from this package's directory for the SDK source
+  // Resolve node_modules from this package's directory
   nodePaths: [path.resolve(__dirname, 'node_modules')],
 };
 
