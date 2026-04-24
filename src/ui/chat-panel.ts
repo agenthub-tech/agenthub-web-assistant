@@ -2,6 +2,7 @@
 // 需求：10.1、10.2、10.4、10.5、11.1、11.2、11.3、11.4、11.5、12.1、12.2、12.4、13.1、13.2、13.3、13.4、15.3、15.4、15.5
 
 import type { ChatPanelTheme } from '../types/channel';
+import type { ChartType, EChartsOption } from '../types/agui';
 import { renderMarkdown } from './markdown';
 
 export type MessageState = 'pending' | 'streaming' | 'done' | 'error';
@@ -12,12 +13,20 @@ export interface MessageFile {
   objectUrl?: string;  // for image preview
 }
 
+export interface ChartData {
+  chartType: ChartType;
+  echartsOption: EChartsOption;
+  availableChartTypes: ChartType[];
+  echartsOptions: Record<ChartType, EChartsOption>;
+}
+
 export interface Message {
   id: string;
   role: 'user' | 'assistant';
   content: string;
   state: MessageState;
   files?: MessageFile[];
+  chart?: ChartData;
 }
 
 const DEFAULT_PRIMARY_COLOR = '#6366F1';
@@ -76,6 +85,7 @@ export class ChatPanel {
 
   private messages: Map<string, Message> = new Map();
   private messageBubbles: Map<string, HTMLElement> = new Map();
+  private chartInstances: Map<string, unknown> = new Map(); // ECharts instances
   private sendHandler: ((input: string, files?: File[]) => void) | null = null;
   private stopHandler: (() => void) | null = null;
   private visible = false;
@@ -993,6 +1003,12 @@ export class ChatPanel {
         bubble.appendChild(filesRow);
       }
 
+      // Chart rendering (if message has chart data)
+      if (message.chart) {
+        const chartContainer = this._createChartContainer(message);
+        bubble.appendChild(chartContainer);
+      }
+
       // Text content (always create contentEl for streaming support)
       const contentEl = document.createElement('span');
       contentEl.setAttribute('data-aa-sdk', 'true');
@@ -1013,6 +1029,148 @@ export class ChatPanel {
 
     wrapper.appendChild(bubble);
     return wrapper;
+  }
+
+  private _createChartContainer(message: Message): HTMLElement {
+    const container = document.createElement('div');
+    container.setAttribute('data-aa-sdk', 'true');
+    container.setAttribute('data-aa-chart', 'true');
+    container.style.cssText = `
+      width: 280px;
+      height: 200px;
+      margin-bottom: 8px;
+      background: #fff;
+      border-radius: 8px;
+      position: relative;
+    `;
+
+    // Chart type switcher
+    if (message.chart && message.chart.availableChartTypes.length > 1) {
+      const switcher = document.createElement('div');
+      switcher.setAttribute('data-aa-sdk', 'true');
+      switcher.style.cssText = `
+        position: absolute;
+        top: 4px;
+        right: 4px;
+        display: flex;
+        gap: 2px;
+        z-index: 10;
+      `;
+
+      const chartTypeLabels: Record<ChartType, string> = {
+        'pie': '饼图',
+        'line': '折线',
+        'bar': '柱状',
+        'bar-horizontal': '条形',
+      };
+
+      for (const ct of message.chart.availableChartTypes) {
+        const btn = document.createElement('button');
+        btn.setAttribute('data-aa-sdk', 'true');
+        btn.textContent = chartTypeLabels[ct] || ct;
+        btn.style.cssText = `
+          padding: 2px 6px;
+          font-size: 10px;
+          border: none;
+          border-radius: 4px;
+          cursor: pointer;
+          background: ${ct === message.chart!.chartType ? this.primaryColor : '#E5E7EB'};
+          color: ${ct === message.chart!.chartType ? '#fff' : '#374151'};
+          transition: all 0.15s ease;
+        `;
+        btn.addEventListener('click', () => {
+          if (!message.chart) return;
+          // Update button styles
+          switcher.querySelectorAll('button').forEach(b => {
+            const bct = b.getAttribute('data-chart-type');
+            if (bct === ct) {
+              (b as HTMLButtonElement).style.background = this.primaryColor;
+              (b as HTMLButtonElement).style.color = '#fff';
+            } else {
+              (b as HTMLButtonElement).style.background = '#E5E7EB';
+              (b as HTMLButtonElement).style.color = '#374151';
+            }
+          });
+          // Update chart
+          this._updateChartType(message.id, ct);
+        });
+        btn.setAttribute('data-chart-type', ct);
+        switcher.appendChild(btn);
+      }
+      container.appendChild(switcher);
+    }
+
+    // Chart element
+    const chartEl = document.createElement('div');
+    chartEl.setAttribute('data-aa-sdk', 'true');
+    chartEl.setAttribute('data-aa-chart-el', 'true');
+    chartEl.style.cssText = 'width: 100%; height: 100%;';
+    container.appendChild(chartEl);
+
+    // Initialize chart asynchronously
+    setTimeout(() => {
+      if (message.chart) {
+        this._initChart(message.id, chartEl, message.chart.echartsOption);
+      }
+    }, 50);
+
+    return container;
+  }
+
+  private async _initChart(messageId: string, chartEl: HTMLElement, option: EChartsOption): Promise<void> {
+    try {
+      // Dynamic import echarts
+      const echarts = await import('echarts');
+      const chart = echarts.init(chartEl, undefined, { renderer: 'canvas' });
+      chart.setOption(option);
+      this.chartInstances.set(messageId, chart);
+
+      // Handle resize
+      const resizeObserver = new ResizeObserver(() => {
+        chart.resize();
+      });
+      resizeObserver.observe(chartEl);
+    } catch (e) {
+      console.error('Failed to initialize chart:', e);
+      chartEl.innerHTML = '<span style="color:#9CA3AF;font-size:12px;">图表加载失败</span>';
+    }
+  }
+
+  private _updateChartType(messageId: string, chartType: ChartType): void {
+    const message = this.messages.get(messageId);
+    if (!message || !message.chart) return;
+
+    const newOption = message.chart.echartsOptions[chartType];
+    if (!newOption) return;
+
+    // Update message data
+    message.chart.chartType = chartType;
+    message.chart.echartsOption = newOption;
+
+    // Update chart instance
+    const chart = this.chartInstances.get(messageId) as { setOption: (opt: EChartsOption, notMerge?: boolean) => void } | undefined;
+    if (chart) {
+      chart.setOption(newOption, true);
+    }
+  }
+
+  /** Add a message with chart data */
+  addChartMessage(
+    role: 'user' | 'assistant',
+    chartData: ChartData,
+    content: string = '',
+    state: MessageState = 'done'
+  ): string {
+    const id = 'msg_' + Date.now() + '_' + Math.random().toString(36).slice(2);
+    const message: Message = { id, role, content, state, chart: chartData };
+    this.messages.set(id, message);
+
+    const bubble = this.createBubble(message);
+    this.messageBubbles.set(id, bubble);
+    this.messageListEl.appendChild(bubble);
+    this.scrollToBottom();
+
+    return id;
   }
 
   private updateBubbleState(wrapper: HTMLElement, message: Message): void {

@@ -57,6 +57,50 @@ export function renderMarkdown(raw: string): string {
       continue;
     }
 
+    // ── Table ───────────────────────────────────────────────────────────
+    // Table format: | col1 | col2 | ... | followed by separator |---|---|...
+    if (line.trim().startsWith('|') && line.trim().endsWith('|')) {
+      const tableLines: string[] = [];
+      // Collect all table lines (header, separator, and data rows)
+      while (i < lines.length && lines[i].trim().startsWith('|') && lines[i].trim().endsWith('|')) {
+        tableLines.push(lines[i].trim());
+        i++;
+      }
+      
+      if (tableLines.length >= 2) {
+        // Parse header
+        const headerCells = parseTableRow(tableLines[0]);
+        // Skip separator line (tableLines[1])
+        const dataRows = tableLines.slice(2).map(parseTableRow);
+        
+        let tableHtml = '<table style="width:100%;border-collapse:collapse;margin:8px 0;font-size:0.9em;">';
+        
+        // Header
+        tableHtml += '<thead><tr>';
+        for (const cell of headerCells) {
+          tableHtml += `<th style="border:1px solid #E5E7EB;padding:8px 12px;text-align:left;background:#F9FAFB;font-weight:600;">${inlineRender(cell)}</th>`;
+        }
+        tableHtml += '</tr></thead>';
+        
+        // Body
+        if (dataRows.length > 0) {
+          tableHtml += '<tbody>';
+          for (const row of dataRows) {
+            tableHtml += '<tr>';
+            for (const cell of row) {
+              tableHtml += `<td style="border:1px solid #E5E7EB;padding:8px 12px;">${inlineRender(cell)}</td>`;
+            }
+            tableHtml += '</tr>';
+          }
+          tableHtml += '</tbody>';
+        }
+        
+        tableHtml += '</table>';
+        out.push(tableHtml);
+      }
+      continue;
+    }
+
     // ── Heading ─────────────────────────────────────────────────────────
     const headingMatch = line.match(/^(#{1,3})\s+(.+)$/);
     if (headingMatch) {
@@ -102,4 +146,13 @@ export function renderMarkdown(raw: string): string {
   }
 
   return out.join('');
+}
+
+/** Parse a table row like "| col1 | col2 |" into an array of cell contents. */
+function parseTableRow(line: string): string[] {
+  // Remove leading and trailing |, then split by |
+  return line
+    .slice(1, -1)
+    .split('|')
+    .map((cell) => cell.trim());
 }

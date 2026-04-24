@@ -7,7 +7,7 @@ import { DOMExecutor } from '../executor/dom-executor';
 import { DOMHighlight } from '../executor/dom-highlight';
 import { VirtualMouse } from '../executor/virtual-mouse';
 import { FloatButton } from '../ui/float-button';
-import { ChatPanel } from '../ui/chat-panel';
+import { ChatPanel, type ChartData } from '../ui/chat-panel';
 import { StepTracker } from '../ui/step-tracker';
 import { ConfirmDialog } from '../ui/confirm-dialog';
 import { TaskBorder } from '../ui/task-border';
@@ -437,6 +437,27 @@ function wireEmitterToUI(
   emitter.on('ToolCallEnd', (event: any) => {
     const payload = event.payload;
     stepTracker.completeStep(payload?.tool_call_id);
+
+    // Handle chart_skill result
+    if (payload?.tool_name === 'chart_skill') {
+      const result = payload?.result;
+      if (result?.success && result?.echarts_options) {
+        const chartData = {
+          chartType: result.chart_type,
+          echartsOption: result.echarts_option,
+          availableChartTypes: result.available_chart_types,
+          echartsOptions: result.echarts_options,
+        };
+        chatPanel.addChartMessage('assistant', chartData, '');
+      } else if (result?.error) {
+        const msgId = chatPanel.addMessage('assistant', 'error');
+        chatPanel.appendDelta(msgId, `图表生成失败: ${result.error}`);
+        chatPanel.setMessageState(msgId, 'error');
+      }
+      return;
+    }
+
+    // Handle dialog_skill result
     if (payload?.tool_name === 'dialog_skill') {
       const result = payload?.result;
       const action = result?.action as string | undefined;

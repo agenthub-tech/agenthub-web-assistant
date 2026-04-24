@@ -44,6 +44,8 @@ export interface ToolCallStartPayload {
 export interface ToolCallEndPayload {
   tool_call_id: string;
   tool_name: string;
+  result?: Record<string, unknown>;
+  render_hint?: 'echarts' | 'table' | 'text';
 }
 
 export interface StateSnapshotPayload {
@@ -68,4 +70,45 @@ export interface RunStartedPayload {
 export interface ToolResult {
   tool_call_id: string;
   result: Record<string, unknown>;
+}
+
+// Chart types
+export type ChartType = 'pie' | 'line' | 'bar' | 'bar-horizontal';
+
+export interface ChartDataItem {
+  name?: string;
+  x?: string;
+  label?: string;
+  value?: number;
+  y?: number;
+}
+
+export interface ChartResult {
+  success: boolean;
+  chart_type: ChartType;
+  echarts_option: EChartsOption;
+  available_chart_types: ChartType[];
+  echarts_options: Record<ChartType, EChartsOption>;
+  data_summary: {
+    row_count: number;
+    chart_type: ChartType;
+    title?: string;
+  };
+  error?: string;
+}
+
+// ECharts option type (simplified)
+export interface EChartsOption {
+  title?: {
+    text?: string;
+    left?: string;
+    textStyle?: { fontSize?: number };
+  };
+  tooltip?: Record<string, unknown>;
+  legend?: Record<string, unknown>;
+  grid?: Record<string, unknown>;
+  xAxis?: Record<string, unknown>;
+  yAxis?: Record<string, unknown>;
+  series?: Array<Record<string, unknown>>;
+  [key: string]: unknown;
 }

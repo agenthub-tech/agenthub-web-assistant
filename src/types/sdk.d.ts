@@ -52,6 +52,7 @@ declare module '@webaa/sdk' {
     threadId?: string;
     runId?: string;
     toolResult?: Record<string, unknown>;
+    files?: File[];
   }
 
   export interface AGUIEvent {
