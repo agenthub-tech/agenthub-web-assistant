@@ -29,7 +29,7 @@
   ],
   "license": "MIT",
   "dependencies": {
-    "agenthub-sdk": "git+https://gogsit.sinocare.com/agenthub/agenthub-sdk-js.git",
+    "agenthub-sdk": "git+https://github.com/agenthub-tech/agenthub-sdk-js.git",
     "echarts": "^5.5.0"
   },
   "devDependencies": {
