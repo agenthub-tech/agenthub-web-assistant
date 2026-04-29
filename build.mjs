@@ -4,7 +4,7 @@ import fs from 'fs';
 import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const API_BASE_URL = 'http://192.168.101.173:30103';
+const API_BASE_URL = process.env.AA_API_BASE || '';
 
 const common = {
   entryPoints: ['src/index.ts'],
