@@ -83488,7 +83488,7 @@ function getSDKInstance() {
 async function init4(options) {
   var _a2, _b2, _c2, _d, _e, _f, _g, _h, _i, _j;
   const { channelKey } = options;
-  const apiBase = (_a2 = options.apiBase) != null ? _a2 : "http://192.168.101.173:30103";
+  const apiBase = (_a2 = options.apiBase) != null ? _a2 : "";
   const pageScanner = new PageScanner();
   const domExecutor = new DOMExecutor(pageScanner);
   const domHighlight = new DOMHighlight(pageScanner);
