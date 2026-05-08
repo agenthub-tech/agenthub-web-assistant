@@ -1,7 +1,7 @@
 // Web Assistant initialization — built on top of JS SDK
 // Requirements: 10.1, 10.2, 10.3, 10.5, 11.1, 11.2, 11.3, 11.4
 
-import { WebAASDK } from 'agenthub-sdk';
+import { WebAASDK, type DialogParams, type DialogResult } from 'agenthub-sdk';
 import { PageScanner } from '../executor/page-scanner';
 import { DOMExecutor } from '../executor/dom-executor';
 import { DOMHighlight } from '../executor/dom-highlight';
@@ -104,12 +104,33 @@ export async function init(options: InitOptions): Promise<void> {
   const stepTracker = new StepTracker(chatPanel.getMessageListEl());
   const confirmDialog = new ConfirmDialog(chatPanel, config.theme.chat_panel?.primary_color ?? '#6366F1');
 
-  // 6. Register local execute handlers for platform builtin skills
-  registerBuiltinSkillHandlers({
-    sdk,
-    chatPanel,
-    primaryColor: config.theme.chat_panel?.primary_color ?? '#6366F1',
+  // 6. Set custom dialog handler (SDK core handles dialog_skill)
+  sdk.setDialogHandler(async (params) => {
+    if (params.action === 'confirm') {
+      return new Promise((resolve) => {
+        chatPanel.addConfirmMessage(params.message, config.theme.chat_panel?.primary_color ?? '#6366F1', (confirmed) => {
+          resolve({ action: 'confirm', message: params.message, confirmed });
+        });
+      });
+    } else if (params.action === 'input') {
+      const placeholder = params.placeholder ?? '';
+      const inputType = params.input_type ?? 'text';
+      return new Promise((resolve) => {
+        chatPanel.addInputMessage(params.message, placeholder, inputType, config.theme.chat_panel?.primary_color ?? '#6366F1', (value) => {
+          resolve({ action: 'input', message: params.message, value });
+        });
+      });
+    } else if (params.action === 'notify') {
+      return { action: 'notify', message: params.message, success: true };
+    } else if (params.action === 'error') {
+      return { action: 'error', message: params.message, error_shown: true };
+    }
+    // Fallback for unknown action - return error result
+    return { action: 'error' as const, message: `Unknown action`, error_shown: true };
   });
+
+  // 7. Register local handlers for wait_skill and http_skill
+  registerBuiltinSkillHandlers({ sdk });
 
   // 7. Register AG-UI event handlers for UI updates
   registerSDKEventHandlers({

@@ -122,11 +122,6 @@ export interface BuiltinSkillHandlerDeps {
     sdk: {
         registerLocalSkill: (name: string, execute: (params: Record<string, unknown>) => Promise<Record<string, unknown>>) => void;
     };
-    chatPanel: {
-        addConfirmMessage: (message: string, primaryColor: string, onResult: (confirmed: boolean) => void) => void;
-        addInputMessage: (message: string, placeholder: string, inputType: 'text' | 'password', primaryColor: string, onSubmit: (value: string) => void) => void;
-    };
-    primaryColor: string;
 }
 export declare function registerBuiltinSkillHandlers(deps: BuiltinSkillHandlerDeps): void;
 export { PAGE_SKILL_SCHEMA, DOM_SKILL_SCHEMA, NAVIGATION_SKILL_SCHEMA, CLIPBOARD_SKILL_SCHEMA, PAGE_SKILL_PROMPT, DOM_SKILL_PROMPT, NAVIGATION_SKILL_PROMPT, };

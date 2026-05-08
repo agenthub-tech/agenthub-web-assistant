@@ -80238,10 +80238,14 @@
     }
   });
 
-  // node_modules/agenthub-sdk/dist/index.js
+  // node_modules/agenthub-sdk/dist/core/sdk.js
   var import_events = __toESM(require_events());
-  var SDK_VERSION = "0.1.0";
+
+  // node_modules/agenthub-sdk/dist/core/types.js
+  var SDK_VERSION = "1.0.0";
   var DEFAULT_PROTOCOL_VERSION = "1.0.0";
+
+  // node_modules/agenthub-sdk/dist/core/sdk.js
   var KNOWN_EVENT_TYPES = /* @__PURE__ */ new Set([
     "RunStarted",
     "RunFinished",
@@ -80279,7 +80283,7 @@
       this._onIdentifyCallbacks = [];
       this._onResetCallbacks = [];
       this._skillCache = /* @__PURE__ */ new Map();
-      this._invalidateListeners = [];
+      this._dialogHandler = null;
     }
     // ── Debug Logging ──
     _log(format2, ...args) {
@@ -80308,7 +80312,6 @@
     }
     /**
      * Fetch channel configuration from GET /api/config.
-     * Returns null on failure (non-critical, caller should use defaults).
      */
     async _fetchChannelConfig() {
       try {
@@ -80323,10 +80326,7 @@
       }
     }
     /**
-     * Initialize the SDK:
-     * 1. Acquire access token
-     * 2. Fetch channel config
-     * 3. Register skills with backend
+     * Initialize the SDK.
      */
     async init(options) {
       var _a2, _b2, _c2, _d, _e, _f, _g, _h, _i;
@@ -80338,7 +80338,7 @@
       this._heartbeatTimeout = (_e = options.heartbeatTimeout) != null ? _e : 45e3;
       this._debug = (_f = options.debug) != null ? _f : false;
       this._disconnected = false;
-      this._log("init start | apiBase=%s channelKey=%s protocol=%s debug=%s", this._apiBase, this._channelKey, this._protocolVersion, this._debug);
+      this._log("init start | apiBase=%s channelKey=%s", this._apiBase, this._channelKey);
       const skills = (_g = options.skills) != null ? _g : [];
       for (const skill of skills) {
         this._skills.set(skill.name, skill);
@@ -80346,7 +80346,7 @@
       await this._acquireToken();
       this._log("token acquired");
       this._channelConfig = await this._fetchChannelConfig();
-      this._log("config fetched | channelConfig=%s", this._channelConfig ? "ok" : "null");
+      this._log("config fetched");
       if (skills.length > 0) {
         const skillsMeta = skills.map(({ name, schema, promptInjection, executionMode, resultCacheFields }) => __spreadValues({
           name,
@@ -80378,6 +80378,7 @@
         await this.identify(options.user);
         this._log("user identified | userId=%s", options.user.userId);
       }
+      this._registerBuiltinSkillHandlers();
       this._log("init complete");
     }
     /**
@@ -80393,11 +80394,10 @@
       if (options.threadId) {
         this._threadId = options.threadId;
       }
-      this._log('run | userInput="%s" runId=%s threadId=%s', ((_a2 = options.userInput) != null ? _a2 : "").slice(0, 80), options.runId, options.threadId);
+      this._log('run | userInput="%s"', ((_a2 = options.userInput) != null ? _a2 : "").slice(0, 80));
       this._startSSEStream(options, emitter, 0, false);
       return emitter;
     }
-    /** Internal: performs the POST, reads the SSE stream, and drives the emitter. */
     async _startSSEStream(options, emitter, retryCount, _isRetryAfterRefresh = false) {
       var _a2, _b2, _c2;
       if (this._disconnected)
@@ -80668,7 +80668,7 @@
       }
     }
     /**
-     * Identify the current end user. Can be called during init or later.
+     * Identify the current end user.
      */
     async identify(user) {
       var _a2, _b2, _c2, _d;
@@ -80699,15 +80699,9 @@
         }
       }
     }
-    /**
-     * Register a callback to run after identify() succeeds.
-     */
     onIdentify(callback) {
       this._onIdentifyCallbacks.push(callback);
     }
-    /**
-     * Create a new thread for the current user.
-     */
     async createThread(title) {
       var _a2;
       if (!this._userId)
@@ -80730,11 +80724,6 @@
       this._threadId = data.id;
       return data;
     }
-    /**
-     * Start a new conversation thread, resetting current run/thread state.
-     * If user is identified, creates a server-side thread.
-     * Returns the new thread id (or null if no user identified).
-     */
     async newThread() {
       this.disconnect();
       this._runId = null;
@@ -80747,10 +80736,6 @@
       }
       return null;
     }
-    /**
-     * Switch to an existing thread by id, loading its message history.
-     * Returns the thread data including messages array.
-     */
     async switchThread(threadId) {
       var _a2;
       if (!this._accessToken)
@@ -80767,10 +80752,6 @@
       }
       return response.json();
     }
-    /**
-     * List threads for the current user.
-     * Returns empty array if user is not identified.
-     */
     async listThreads(limit = 20, offset = 0) {
       if (!this._userId || !this._accessToken)
         return [];
@@ -80787,13 +80768,19 @@
       return response.json();
     }
     /**
-     * Register a local skill execute handler without sending it to the backend.
+     * Register a local skill execute handler.
      */
     registerLocalSkill(name, execute) {
       this._localSkills.set(name, execute);
     }
     /**
-     * Disconnect from the backend, close any active SSE connections.
+     * Set custom dialog handler for dialog_skill.
+     */
+    setDialogHandler(handler) {
+      this._dialogHandler = handler;
+    }
+    /**
+     * Disconnect from the backend.
      */
     disconnect() {
       this._log("disconnect");
@@ -80812,8 +80799,7 @@
       }
     }
     /**
-     * Reset user state (logout). Disconnects, clears userId/threadId/runId.
-     * Fires onReset callbacks so upper layers can clean up UI.
+     * Reset user state (logout).
      */
     reset() {
       this._log("reset");
@@ -80830,16 +80816,39 @@
         }
       }
     }
-    /**
-     * Register a callback to run when reset() is called (user logout).
-     */
     onReset(callback) {
       this._onResetCallbacks.push(callback);
     }
-    // ── L1 SDK Auto Cache ──
-    /**
-     * Update cache after a skill execution. Called automatically by _parseSSEStream.
-     */
+    // ── Built-in Skill Handlers ─────────────────────────────────────────────────
+    _registerBuiltinSkillHandlers() {
+      this.registerLocalSkill("dialog_skill", async (params) => {
+        const dialogParams = params;
+        if (this._dialogHandler) {
+          return this._dialogHandler(dialogParams);
+        }
+        return this._defaultDialogHandler(dialogParams);
+      });
+    }
+    async _defaultDialogHandler(params) {
+      var _a2, _b2, _c2;
+      const action = params.action;
+      const msg = params.message;
+      if (action === "confirm") {
+        const confirmed = typeof window !== "undefined" && window.confirm ? window.confirm(msg) : false;
+        return { action: "confirm", message: msg, confirmed };
+      } else if (action === "input") {
+        const placeholder = (_a2 = params.placeholder) != null ? _a2 : "";
+        const inputType = (_b2 = params.input_type) != null ? _b2 : "text";
+        const value = typeof window !== "undefined" && window.prompt ? (_c2 = window.prompt(msg + (placeholder ? ` (${placeholder})` : ""))) != null ? _c2 : "" : "";
+        return { action: "input", message: msg, value };
+      } else if (action === "notify") {
+        return { action: "notify", message: msg, success: true };
+      } else if (action === "error") {
+        return { action: "error", message: msg, error_shown: true };
+      }
+      return { success: false, error: `Unknown action: ${action}` };
+    }
+    // ── L1 SDK Auto Cache ───────────────────────────────────────────────────────
     _cacheSkillResult(skillName, result) {
       var _a2;
       const skill = this._skills.get(skillName);
@@ -80871,10 +80880,6 @@
         });
       }
     }
-    /**
-     * Build the skill_cache object to inject into run context.
-     * Only includes fresh/stale entries (expired are excluded).
-     */
     _buildCacheContext() {
       this._refreshCacheFreshness();
       const entries = {};
@@ -80887,12 +80892,9 @@
       }
       return hasEntries ? entries : null;
     }
-    /**
-     * Check TTL and update freshness for all cached entries.
-     */
     _refreshCacheFreshness() {
       const now = Date.now();
-      for (const [name, entry] of this._skillCache) {
+      for (const entry of this._skillCache.values()) {
         if (entry.freshness === "expired")
           continue;
         if (entry.policy.ttl > 0 && now - entry.timestamp > entry.policy.ttl) {
@@ -80900,12 +80902,9 @@
         }
       }
     }
-    /**
-     * Invalidate cache entries by event name (e.g. 'urlchange', 'dom:mutation:10').
-     */
     invalidateCache(eventName) {
       var _a2;
-      for (const [name, entry] of this._skillCache) {
+      for (const entry of this._skillCache.values()) {
         if (entry.freshness === "expired")
           continue;
         if ((_a2 = entry.policy.invalidateOn) == null ? void 0 : _a2.includes(eventName)) {
@@ -80913,9 +80912,6 @@
         }
       }
     }
-    /**
-     * Clear all cache entries (called on reset/newThread).
-     */
     _clearCache() {
       this._skillCache.clear();
     }
@@ -83362,7 +83358,7 @@
     ];
   }
   function registerBuiltinSkillHandlers(deps) {
-    const { sdk, chatPanel, primaryColor } = deps;
+    const { sdk } = deps;
     sdk.registerLocalSkill("wait_skill", async (params) => {
       var _a2;
       const condition = params.condition;
@@ -83406,31 +83402,6 @@
           }
         }, POLL_INTERVAL);
       });
-    });
-    sdk.registerLocalSkill("dialog_skill", async (params) => {
-      var _a2, _b2;
-      const action = params.action;
-      const message = params.message;
-      if (action === "confirm") {
-        return new Promise((resolve) => {
-          chatPanel.addConfirmMessage(message, primaryColor, (confirmed) => {
-            resolve({ action: "confirm", message, confirmed });
-          });
-        });
-      } else if (action === "input") {
-        const placeholder = (_a2 = params.placeholder) != null ? _a2 : "";
-        const inputType = (_b2 = params.input_type) != null ? _b2 : "text";
-        return new Promise((resolve) => {
-          chatPanel.addInputMessage(message, placeholder, inputType, primaryColor, (value) => {
-            resolve({ action: "input", message, value });
-          });
-        });
-      } else if (action === "notify") {
-        return { action: "notify", message, success: true };
-      } else if (action === "error") {
-        return { action: "error", message, error_shown: true };
-      }
-      return { success: false, error: `Unknown action: ${action}` };
     });
     sdk.registerLocalSkill("http_skill", async (params) => {
       var _a2;
@@ -83488,7 +83459,7 @@
     return _sdkInstance;
   }
   async function init4(options) {
-    var _a2, _b2, _c2, _d, _e, _f, _g, _h, _i, _j;
+    var _a2, _b2, _c2, _d, _e, _f, _g, _h;
     const { channelKey } = options;
     const apiBase = (_a2 = options.apiBase) != null ? _a2 : "";
     const pageScanner = new PageScanner();
@@ -83545,11 +83516,32 @@
     }
     const stepTracker = new StepTracker(chatPanel.getMessageListEl());
     const confirmDialog = new ConfirmDialog(chatPanel, (_h = (_g = config.theme.chat_panel) == null ? void 0 : _g.primary_color) != null ? _h : "#6366F1");
-    registerBuiltinSkillHandlers({
-      sdk,
-      chatPanel,
-      primaryColor: (_j = (_i = config.theme.chat_panel) == null ? void 0 : _i.primary_color) != null ? _j : "#6366F1"
+    sdk.setDialogHandler(async (params) => {
+      var _a3, _b3;
+      if (params.action === "confirm") {
+        return new Promise((resolve) => {
+          var _a4, _b4;
+          chatPanel.addConfirmMessage(params.message, (_b4 = (_a4 = config.theme.chat_panel) == null ? void 0 : _a4.primary_color) != null ? _b4 : "#6366F1", (confirmed) => {
+            resolve({ action: "confirm", message: params.message, confirmed });
+          });
+        });
+      } else if (params.action === "input") {
+        const placeholder = (_a3 = params.placeholder) != null ? _a3 : "";
+        const inputType = (_b3 = params.input_type) != null ? _b3 : "text";
+        return new Promise((resolve) => {
+          var _a4, _b4;
+          chatPanel.addInputMessage(params.message, placeholder, inputType, (_b4 = (_a4 = config.theme.chat_panel) == null ? void 0 : _a4.primary_color) != null ? _b4 : "#6366F1", (value) => {
+            resolve({ action: "input", message: params.message, value });
+          });
+        });
+      } else if (params.action === "notify") {
+        return { action: "notify", message: params.message, success: true };
+      } else if (params.action === "error") {
+        return { action: "error", message: params.message, error_shown: true };
+      }
+      return { action: "error", message: `Unknown action`, error_shown: true };
     });
+    registerBuiltinSkillHandlers({ sdk });
     registerSDKEventHandlers({
       sdk,
       chatPanel,

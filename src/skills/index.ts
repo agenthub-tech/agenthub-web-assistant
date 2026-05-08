@@ -301,15 +301,15 @@ export function buildWebSkills(deps: SkillExecutorDeps): SkillDefinition[] {
 // ── Local execute handlers for platform builtin skills (execution_mode: "sdk") ──
 // These skills have their schemas provided by the backend, but execute on the SDK side.
 // Call registerBuiltinSkillHandlers() after sdk.init() to register them.
+//
+// NOTE: dialog_skill is handled by SDK core with setDialogHandler(), don't register here.
 
 export interface BuiltinSkillHandlerDeps {
   sdk: { registerLocalSkill: (name: string, execute: (params: Record<string, unknown>) => Promise<Record<string, unknown>>) => void };
-  chatPanel: { addConfirmMessage: (message: string, primaryColor: string, onResult: (confirmed: boolean) => void) => void; addInputMessage: (message: string, placeholder: string, inputType: 'text' | 'password', primaryColor: string, onSubmit: (value: string) => void) => void };
-  primaryColor: string;
 }
 
 export function registerBuiltinSkillHandlers(deps: BuiltinSkillHandlerDeps): void {
-  const { sdk, chatPanel, primaryColor } = deps;
+  const { sdk } = deps;
 
   // WaitSkill — wait for DOM element visibility or a duration
   sdk.registerLocalSkill('wait_skill', async (params) => {
@@ -361,34 +361,6 @@ export function registerBuiltinSkillHandlers(deps: BuiltinSkillHandlerDeps): voi
         }
       }, POLL_INTERVAL);
     });
-  });
-
-  // DialogSkill — show confirmation/input/notification dialogs
-  sdk.registerLocalSkill('dialog_skill', async (params) => {
-    const action = params.action as string;
-    const message = params.message as string;
-
-    if (action === 'confirm') {
-      return new Promise<Record<string, unknown>>((resolve) => {
-        chatPanel.addConfirmMessage(message, primaryColor, (confirmed) => {
-          resolve({ action: 'confirm', message, confirmed });
-        });
-      });
-    } else if (action === 'input') {
-      const placeholder = (params.placeholder as string) ?? '';
-      const inputType = (params.input_type as 'text' | 'password') ?? 'text';
-      return new Promise<Record<string, unknown>>((resolve) => {
-        chatPanel.addInputMessage(message, placeholder, inputType, primaryColor, (value) => {
-          resolve({ action: 'input', message, value });
-        });
-      });
-    } else if (action === 'notify') {
-      return { action: 'notify', message, success: true };
-    } else if (action === 'error') {
-      return { action: 'error', message, error_shown: true };
-    }
-
-    return { success: false, error: `Unknown action: ${action}` };
   });
 
   // HttpSkill — make HTTP requests from the browser
