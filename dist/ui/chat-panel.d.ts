@@ -53,7 +53,13 @@ export declare class ChatPanel {
     private fileInputEl;
     private uploadBtnEl;
     private primaryColor;
+    private backgroundColor;
     private fontFamily;
+    private textColor;
+    private mutedTextColor;
+    private surfaceColor;
+    private subtleSurfaceColor;
+    private borderColor;
     constructor(theme?: Partial<ChatPanelTheme>, position?: 'bottom-right' | 'bottom-left');
     getPrimaryColor(): string;
     show(): void;

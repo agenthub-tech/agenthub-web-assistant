@@ -81814,6 +81814,7 @@ function parseTableRow(line) {
 
 // src/ui/chat-panel.ts
 var DEFAULT_PRIMARY_COLOR = "#6366F1";
+var DEFAULT_BACKGROUND_COLOR = "#FFFFFF";
 var DEFAULT_FONT_FAMILY2 = "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
 var DOTS_STYLE_ID = "aa-sdk-dots-style";
 function injectDotStyles() {
@@ -81837,6 +81838,16 @@ var AA_LOGO_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22
   <rect x="2" y="6" width="24" height="16" rx="4" fill="rgba(255,255,255,0.25)"/>
   <text x="14" y="18" font-family="Arial,sans-serif" font-size="10" font-weight="bold" fill="white" text-anchor="middle">AA</text>
 </svg>`;
+function isValidHexColor(color) {
+  return typeof color === "string" && /^#[0-9A-Fa-f]{6}$/.test(color);
+}
+function getContrastTextColor(color) {
+  const r = parseInt(color.slice(1, 3), 16);
+  const g = parseInt(color.slice(3, 5), 16);
+  const b = parseInt(color.slice(5, 7), 16);
+  const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  return luminance < 0.55 ? "#F9FAFB" : "#111827";
+}
 var ChatPanel = class {
   constructor(theme2, position2 = "bottom-right") {
     this.threadListVisible = false;
@@ -81854,7 +81865,14 @@ var ChatPanel = class {
     this.pendingFiles = [];
     var _a2, _b2;
     this.primaryColor = (_a2 = theme2 == null ? void 0 : theme2.primary_color) != null ? _a2 : DEFAULT_PRIMARY_COLOR;
+    this.backgroundColor = isValidHexColor(theme2 == null ? void 0 : theme2.background_color) ? theme2.background_color : DEFAULT_BACKGROUND_COLOR;
     this.fontFamily = (_b2 = theme2 == null ? void 0 : theme2.font_family) != null ? _b2 : DEFAULT_FONT_FAMILY2;
+    this.textColor = getContrastTextColor(this.backgroundColor);
+    const darkBackground = this.textColor === "#F9FAFB";
+    this.mutedTextColor = darkBackground ? "rgba(249,250,251,0.72)" : "#6B7280";
+    this.surfaceColor = darkBackground ? "rgba(255,255,255,0.12)" : "#F3F4F6";
+    this.subtleSurfaceColor = darkBackground ? "rgba(255,255,255,0.08)" : "#F9FAFB";
+    this.borderColor = darkBackground ? "rgba(255,255,255,0.14)" : "#E5E7EB";
     injectDotStyles();
     const hAlign = position2 === "bottom-left" ? "left: 24px;" : "right: 24px;";
     this.panelEl = document.createElement("div");
@@ -81868,7 +81886,8 @@ var ChatPanel = class {
       z-index: 10000;
       display: none;
       flex-direction: column;
-      background: #ffffff;
+      background: ${this.backgroundColor};
+      color: ${this.textColor};
       border-radius: 16px;
       box-shadow: 0 8px 40px rgba(0,0,0,0.18);
       overflow: hidden;
@@ -81927,7 +81946,7 @@ var ChatPanel = class {
       left: 0;
       right: 0;
       bottom: 0;
-      background: #ffffff;
+      background: ${this.backgroundColor};
       z-index: 10;
       flex-direction: column;
       overflow: hidden;
@@ -81938,6 +81957,8 @@ var ChatPanel = class {
       flex: 1;
       overflow-y: auto;
       padding: 12px 12px 4px 12px;
+      background: ${this.backgroundColor};
+      color: ${this.textColor};
       display: flex;
       flex-direction: column;
       gap: 8px;
@@ -81949,9 +81970,9 @@ var ChatPanel = class {
       align-items: flex-end;
       gap: 8px;
       padding: 10px 12px;
-      border-top: 1px solid #F3F4F6;
+      border-top: 1px solid ${this.borderColor};
       flex-shrink: 0;
-      background: #ffffff;
+      background: ${this.backgroundColor};
     `;
     this.textareaEl = document.createElement("textarea");
     this.textareaEl.setAttribute("data-aa-sdk", "true");
@@ -81960,26 +81981,26 @@ var ChatPanel = class {
     this.textareaEl.style.cssText = `
       flex: 1;
       resize: none;
-      border: 1px solid #E5E7EB;
+      border: 1px solid ${this.borderColor};
       border-radius: 10px;
       padding: 8px 12px;
       font-size: 14px;
       font-family: ${this.fontFamily};
-      color: #111827;
+      color: ${this.textColor};
       outline: none;
       line-height: 1.5;
       max-height: 120px;
       overflow-y: auto;
-      background: #F9FAFB;
-      transition: border-color 0.15s ease;
+      background: ${this.subtleSurfaceColor};
+      transition: border-color 0.15s ease, background 0.15s ease;
     `;
     this.textareaEl.addEventListener("focus", () => {
       this.textareaEl.style.borderColor = this.primaryColor;
-      this.textareaEl.style.background = "#ffffff";
+      this.textareaEl.style.background = this.surfaceColor;
     });
     this.textareaEl.addEventListener("blur", () => {
-      this.textareaEl.style.borderColor = "#E5E7EB";
-      this.textareaEl.style.background = "#F9FAFB";
+      this.textareaEl.style.borderColor = this.borderColor;
+      this.textareaEl.style.background = this.subtleSurfaceColor;
     });
     this.textareaEl.addEventListener("keydown", (e2) => {
       if (e2.key === "Enter" && !e2.shiftKey) {
@@ -82054,7 +82075,7 @@ var ChatPanel = class {
       border-radius: 8px;
       border: none;
       background: transparent;
-      color: #9CA3AF;
+      color: ${this.mutedTextColor};
       cursor: pointer;
       display: flex;
       align-items: center;
@@ -82067,7 +82088,7 @@ var ChatPanel = class {
       this.uploadBtnEl.style.color = this.primaryColor;
     });
     this.uploadBtnEl.addEventListener("mouseleave", () => {
-      this.uploadBtnEl.style.color = "#9CA3AF";
+      this.uploadBtnEl.style.color = this.mutedTextColor;
     });
     this.uploadBtnEl.addEventListener("click", () => this.fileInputEl.click());
     this.filePreviewEl = document.createElement("div");
@@ -82075,9 +82096,9 @@ var ChatPanel = class {
     this.filePreviewEl.style.cssText = `
       display: none;
       padding: 6px 12px;
-      border-top: 1px solid #F3F4F6;
+      border-top: 1px solid ${this.borderColor};
       flex-shrink: 0;
-      background: #F9FAFB;
+      background: ${this.backgroundColor};
       flex-wrap: wrap;
       gap: 4px;
     `;
@@ -82175,7 +82196,7 @@ var ChatPanel = class {
     `;
     const listTitle = document.createElement("span");
     listTitle.setAttribute("data-aa-sdk", "true");
-    listTitle.style.cssText = `font-size:14px;font-weight:600;color:#111827;font-family:${this.fontFamily};`;
+    listTitle.style.cssText = `font-size:14px;font-weight:600;color:${this.textColor};font-family:${this.fontFamily};`;
     listTitle.textContent = "\u4F1A\u8BDD\u5217\u8868";
     const newBtn = document.createElement("button");
     newBtn.setAttribute("data-aa-sdk", "true");
@@ -82213,7 +82234,7 @@ var ChatPanel = class {
     if (threads.length === 0) {
       const empty = document.createElement("div");
       empty.setAttribute("data-aa-sdk", "true");
-      empty.style.cssText = `padding:24px 14px;text-align:center;color:#9CA3AF;font-size:13px;font-family:${this.fontFamily};`;
+      empty.style.cssText = `padding:24px 14px;text-align:center;color:${this.mutedTextColor};font-size:13px;font-family:${this.fontFamily};`;
       empty.textContent = "\u6682\u65E0\u4F1A\u8BDD\u8BB0\u5F55";
       scrollArea.appendChild(empty);
     } else {
@@ -82229,17 +82250,17 @@ var ChatPanel = class {
           margin-bottom: 4px;
           border-radius: 8px;
           cursor: pointer;
-          background: ${isActive ? this.primaryColor + "12" : "#F9FAFB"};
+          background: ${isActive ? this.primaryColor + "12" : this.subtleSurfaceColor};
           border: 1px solid ${isActive ? this.primaryColor + "40" : "transparent"};
           transition: background 0.15s ease;
           font-family: ${this.fontFamily};
         `;
         row.addEventListener("mouseenter", () => {
           if (!isActive)
-            row.style.background = "#F3F4F6";
+            row.style.background = this.surfaceColor;
         });
         row.addEventListener("mouseleave", () => {
-          row.style.background = isActive ? this.primaryColor + "12" : "#F9FAFB";
+          row.style.background = isActive ? this.primaryColor + "12" : this.subtleSurfaceColor;
         });
         row.addEventListener("click", () => {
           this.threadListVisible = false;
@@ -82249,11 +82270,11 @@ var ChatPanel = class {
         });
         const titleRow = document.createElement("span");
         titleRow.setAttribute("data-aa-sdk", "true");
-        titleRow.style.cssText = `font-size:13px;color:#111827;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;`;
+        titleRow.style.cssText = `font-size:13px;color:${this.textColor};font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;`;
         titleRow.textContent = thread.title || "\u65B0\u4F1A\u8BDD";
         const metaRow = document.createElement("span");
         metaRow.setAttribute("data-aa-sdk", "true");
-        metaRow.style.cssText = `font-size:11px;color:#9CA3AF;`;
+        metaRow.style.cssText = `font-size:11px;color:${this.mutedTextColor};`;
         const date = new Date(thread.updated_at);
         const dateStr = `${date.getMonth() + 1}/${date.getDate()} ${date.getHours().toString().padStart(2, "0")}:${date.getMinutes().toString().padStart(2, "0")}`;
         metaRow.textContent = `${thread.message_count} \u6761\u6D88\u606F \xB7 ${dateStr}`;
@@ -82292,8 +82313,8 @@ var ChatPanel = class {
       border-radius: 14px 14px 14px 4px;
       font-size: 14px;
       line-height: 1.55;
-      background: #F3F4F6;
-      color: #111827;
+      background: ${this.surfaceColor};
+      color: ${this.textColor};
       font-family: ${this.fontFamily};
       display: flex;
       flex-direction: column;
@@ -82310,20 +82331,20 @@ var ChatPanel = class {
       width: 100%;
       box-sizing: border-box;
       padding: 7px 10px;
-      border: 1px solid #D1D5DB;
+      border: 1px solid ${this.borderColor};
       border-radius: 6px;
       font-size: 13px;
       font-family: ${this.fontFamily};
       outline: none;
-      background: #fff;
-      color: #111827;
+      background: ${this.backgroundColor};
+      color: ${this.textColor};
       transition: border-color 0.15s ease;
     `;
     inputEl.addEventListener("focus", () => {
       inputEl.style.borderColor = primaryColor;
     });
     inputEl.addEventListener("blur", () => {
-      inputEl.style.borderColor = "#D1D5DB";
+      inputEl.style.borderColor = this.borderColor;
     });
     const submitBtn = document.createElement("button");
     submitBtn.setAttribute("data-aa-sdk", "true");
@@ -82391,8 +82412,8 @@ var ChatPanel = class {
       font-size: 14px;
       line-height: 1.55;
       word-break: break-word;
-      background: #F3F4F6;
-      color: #111827;
+      background: ${this.surfaceColor};
+      color: ${this.textColor};
       font-family: ${this.fontFamily};
       display: flex;
       flex-direction: column;
@@ -82414,9 +82435,9 @@ var ChatPanel = class {
         font-size: 13px;
         cursor: pointer;
         outline: none;
-        border: ${isPrimary ? "none" : "1px solid #D1D5DB"};
-        background: ${isPrimary ? primaryColor : "#ffffff"};
-        color: ${isPrimary ? "#ffffff" : "#374151"};
+        border: ${isPrimary ? "none" : `1px solid ${this.borderColor}`};
+        background: ${isPrimary ? primaryColor : this.backgroundColor};
+        color: ${isPrimary ? "#ffffff" : this.textColor};
         transition: opacity 0.15s ease;
       `;
       btn.addEventListener("mouseenter", () => {
@@ -82562,10 +82583,10 @@ var ChatPanel = class {
         align-items: center;
         gap: 4px;
         padding: ${isImage ? "2px" : "4px 8px"};
-        background: #E5E7EB;
+        background: ${this.surfaceColor};
         border-radius: ${isImage ? "6px" : "12px"};
         font-size: 11px;
-        color: #374151;
+        color: ${this.textColor};
       `;
       if (isImage) {
         const img = document.createElement("img");
@@ -82591,7 +82612,7 @@ var ChatPanel = class {
         width: 14px;
         height: 14px;
         border-radius: 50%;
-        background: #6B7280;
+        background: ${this.mutedTextColor};
         color: #fff;
         font-size: 10px;
         line-height: 14px;
@@ -82628,7 +82649,7 @@ var ChatPanel = class {
       word-break: break-word;
       ${isUser ? "white-space: pre-wrap;" : ""}
       font-family: ${this.fontFamily};
-      ${isUser ? `background: ${this.primaryColor}; color: #ffffff;` : "background: #F3F4F6; color: #111827;"}
+      ${isUser ? `background: ${this.primaryColor}; color: #ffffff;` : `background: ${this.surfaceColor}; color: ${this.textColor};`}
     `;
     if (message.state === "pending") {
       bubble.innerHTML = this.pendingDotsHTML();
@@ -82651,8 +82672,8 @@ var ChatPanel = class {
             fileChip.style.cssText = `
               display:inline-flex;align-items:center;gap:4px;
               padding:4px 8px;border-radius:6px;font-size:11px;
-              background:${isUser ? "rgba(255,255,255,0.2)" : "#E5E7EB"};
-              color:${isUser ? "#fff" : "#374151"};
+              background:${isUser ? "rgba(255,255,255,0.2)" : this.subtleSurfaceColor};
+              color:${isUser ? "#fff" : this.textColor};
             `;
             fileChip.innerHTML = `<span>${isPdf ? "\u{1F4D5}" : "\u{1F4C4}"}</span><span style="max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${f.name}</span>`;
             filesRow.appendChild(fileChip);
@@ -82690,7 +82711,8 @@ var ChatPanel = class {
       width: 280px;
       height: 200px;
       margin-bottom: 8px;
-      background: #fff;
+      background: ${this.subtleSurfaceColor};
+      border: 1px solid ${this.borderColor};
       border-radius: 8px;
       position: relative;
     `;
@@ -82721,8 +82743,8 @@ var ChatPanel = class {
           border: none;
           border-radius: 4px;
           cursor: pointer;
-          background: ${ct === message.chart.chartType ? this.primaryColor : "#E5E7EB"};
-          color: ${ct === message.chart.chartType ? "#fff" : "#374151"};
+          background: ${ct === message.chart.chartType ? this.primaryColor : this.borderColor};
+          color: ${ct === message.chart.chartType ? "#fff" : this.textColor};
           transition: all 0.15s ease;
         `;
         btn.addEventListener("click", () => {
@@ -82734,8 +82756,8 @@ var ChatPanel = class {
               b.style.background = this.primaryColor;
               b.style.color = "#fff";
             } else {
-              b.style.background = "#E5E7EB";
-              b.style.color = "#374151";
+              b.style.background = this.borderColor;
+              b.style.color = this.textColor;
             }
           });
           this._updateChartType(message.id, ct);
@@ -82769,7 +82791,7 @@ var ChatPanel = class {
       resizeObserver.observe(chartEl);
     } catch (e2) {
       console.error("Failed to initialize chart:", e2);
-      chartEl.innerHTML = '<span style="color:#9CA3AF;font-size:12px;">\u56FE\u8868\u52A0\u8F7D\u5931\u8D25</span>';
+      chartEl.innerHTML = `<span style="color:${this.mutedTextColor};font-size:12px;">\u56FE\u8868\u52A0\u8F7D\u5931\u8D25</span>`;
     }
   }
   _updateChartType(messageId, chartType) {
@@ -82813,8 +82835,8 @@ var ChatPanel = class {
         contentEl.textContent = message.content;
       }
       bubble.appendChild(contentEl);
-      bubble.style.background = "#F3F4F6";
-      bubble.style.color = "#111827";
+      bubble.style.background = isAssistant ? this.surfaceColor : this.primaryColor;
+      bubble.style.color = isAssistant ? this.textColor : "#ffffff";
       bubble.style.border = "";
     } else if (message.state === "done") {
       const contentEl = bubble.querySelector("[data-aa-content]");
@@ -82825,8 +82847,8 @@ var ChatPanel = class {
           contentEl.textContent = message.content;
         }
       }
-      bubble.style.background = "#F3F4F6";
-      bubble.style.color = "#111827";
+      bubble.style.background = isAssistant ? this.surfaceColor : this.primaryColor;
+      bubble.style.color = isAssistant ? this.textColor : "#ffffff";
       bubble.style.border = "";
     } else if (message.state === "error") {
       const contentEl = bubble.querySelector("[data-aa-content]");
@@ -83447,6 +83469,7 @@ var DEFAULT_CONFIG2 = {
     float_button: { position: "bottom-right", color: "#6366F1" },
     chat_panel: {
       primary_color: "#6366F1",
+      background_color: "#FFFFFF",
       font_family: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
     }
   },

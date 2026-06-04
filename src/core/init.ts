@@ -21,6 +21,7 @@ const DEFAULT_CONFIG: ChannelConfig = {
     float_button: { position: 'bottom-right', color: '#6366F1' },
     chat_panel: {
       primary_color: '#6366F1',
+      background_color: '#FFFFFF',
       font_family: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
     },
   },

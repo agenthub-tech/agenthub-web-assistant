@@ -6,6 +6,7 @@ export interface FloatButtonTheme {
 export interface ChatPanelTheme {
     logo_url?: string;
     primary_color: string;
+    background_color?: string;
     font_family?: string;
     welcome_message?: string | null;
 }
