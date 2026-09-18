@@ -459,6 +459,13 @@ function wireEmitterToUI(
   emitter.on('ToolCallStart', (event: any) => {
     const payload = event.payload;
     const stepDesc = payload?.step_description as string | undefined;
+    // Text streamed before a tool call is internal preamble. The backend never
+    // closes it with TextMessageEnd by design (consumers discard it), so drop
+    // the open bubble here instead of leaving orphan narration on screen.
+    if (currentMsgId !== null) {
+      chatPanel.removeMessage(currentMsgId);
+      currentMsgId = null;
+    }
     stepTracker.addStep(payload.tool_call_id, payload.tool_name, stepDesc ? { step_description: stepDesc } : undefined);
   });
 

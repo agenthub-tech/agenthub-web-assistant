@@ -83870,6 +83870,10 @@
     emitter.on("ToolCallStart", (event) => {
       const payload = event.payload;
       const stepDesc = payload == null ? void 0 : payload.step_description;
+      if (currentMsgId !== null) {
+        chatPanel.removeMessage(currentMsgId);
+        currentMsgId = null;
+      }
       stepTracker.addStep(payload.tool_call_id, payload.tool_name, stepDesc ? { step_description: stepDesc } : void 0);
     });
     emitter.on("ToolCallEnd", (event) => {
