@@ -445,6 +445,12 @@ function wireEmitterToUI(
         chatPanel.removeMessage(currentMsgId);
         shownDialogMessages.delete(msgContent);
       } else {
+        // END carries the authoritative full message content. Replace the
+        // accumulated deltas with it so a terminal-tool message supersedes any
+        // streamed preamble in the same bubble.
+        if (typeof msgContent === 'string' && msgContent.length > 0) {
+          chatPanel.replaceContent(currentMsgId, msgContent);
+        }
         chatPanel.setMessageState(currentMsgId, 'done');
       }
     }

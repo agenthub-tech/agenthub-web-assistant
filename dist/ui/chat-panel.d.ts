@@ -89,6 +89,13 @@ export declare class ChatPanel {
     addMessage(role: 'user' | 'assistant', state?: MessageState, initialContent?: string, files?: File[]): string;
     removeMessage(messageId: string): void;
     appendDelta(messageId: string, delta: string): void;
+    /**
+     * Replace the full content of a message bubble.
+     * Used when TextMessageEnd carries authoritative content that differs from
+     * the accumulated deltas (e.g. terminal tool message replacing a streamed
+     * preamble).
+     */
+    replaceContent(messageId: string, content: string): void;
     setMessageState(messageId: string, state: MessageState): void;
     setInputEnabled(enabled: boolean): void;
     getMessageListEl(): HTMLElement;

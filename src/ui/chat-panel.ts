@@ -844,6 +844,34 @@ export class ChatPanel {
     this.scrollToBottom();
   }
 
+  /**
+   * Replace the full content of a message bubble.
+   * Used when TextMessageEnd carries authoritative content that differs from
+   * the accumulated deltas (e.g. terminal tool message replacing a streamed
+   * preamble).
+   */
+  replaceContent(messageId: string, content: string): void {
+    const message = this.messages.get(messageId);
+    if (!message || message.content === content) return;
+
+    message.content = content;
+
+    if (!this.visible) return;
+
+    const bubble = this.messageBubbles.get(messageId);
+    if (!bubble) return;
+
+    const contentEl = bubble.querySelector('[data-aa-content]') as HTMLElement | null;
+    if (contentEl) {
+      if (message.role === 'assistant') {
+        contentEl.innerHTML = renderMarkdown(message.content);
+      } else {
+        contentEl.textContent = message.content;
+      }
+    }
+    this.scrollToBottom();
+  }
+
   setMessageState(messageId: string, state: MessageState): void {
     const message = this.messages.get(messageId);
     if (!message) return;

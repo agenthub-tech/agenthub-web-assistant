@@ -82522,6 +82522,32 @@
       }
       this.scrollToBottom();
     }
+    /**
+     * Replace the full content of a message bubble.
+     * Used when TextMessageEnd carries authoritative content that differs from
+     * the accumulated deltas (e.g. terminal tool message replacing a streamed
+     * preamble).
+     */
+    replaceContent(messageId, content) {
+      const message = this.messages.get(messageId);
+      if (!message || message.content === content)
+        return;
+      message.content = content;
+      if (!this.visible)
+        return;
+      const bubble = this.messageBubbles.get(messageId);
+      if (!bubble)
+        return;
+      const contentEl = bubble.querySelector("[data-aa-content]");
+      if (contentEl) {
+        if (message.role === "assistant") {
+          contentEl.innerHTML = renderMarkdown(message.content);
+        } else {
+          contentEl.textContent = message.content;
+        }
+      }
+      this.scrollToBottom();
+    }
     setMessageState(messageId, state) {
       const message = this.messages.get(messageId);
       if (!message)
@@ -83834,6 +83860,9 @@
           chatPanel.removeMessage(currentMsgId);
           shownDialogMessages.delete(msgContent);
         } else {
+          if (typeof msgContent === "string" && msgContent.length > 0) {
+            chatPanel.replaceContent(currentMsgId, msgContent);
+          }
           chatPanel.setMessageState(currentMsgId, "done");
         }
       }
