@@ -1,7 +1,7 @@
 // PageScanner — DOM 快照提取
 // 需求：4.1、4.2、4.3、4.4、4.5、4.6、4.7、4.8、5.1、5.2
 
-import type { DOMElement, ScanResult } from '../types/dom';
+import type { DOMElement, ScanResult, PageOutlineItem, DataTableSummary, ChartSummary, TextBlockSummary } from '../types/dom';
 
 const SELECTORS = [
   'button',
@@ -22,6 +22,316 @@ const SELECTORS = [
 ];
 
 const MAX_ELEMENTS = 200;
+
+// Data-table extraction budgets. Tables are read-only content, discovered as
+// compact summaries first; full content is fetched on demand (progressive
+// discovery) to keep the page_skill overview payload small.
+const MAX_TABLES = 12;
+const MAX_DETAIL_ROWS = 200;
+const MAX_DETAIL_CHARS = 20000;
+const PREVIEW_ROWS = 2;
+
+interface DataTableData {
+  table: Element;
+  title: string;
+  headers: string[];
+  rows: string[][];
+}
+
+/**
+ * Compute per-column header labels for a table with multi-row headers,
+ * correctly handling rowspan/colspan (e.g. "累计" group over "实际/完成率/同比").
+ */
+function computeHeaderLabels(table: Element): string[] {
+  const thead = table.querySelector('thead');
+  if (!thead) return [];
+  const rows = Array.from(thead.querySelectorAll('tr'));
+  if (rows.length === 0) return [];
+
+  // Occupancy grid: taken[r][c] marks a cell slot filled by rowspan/colspan.
+  const taken: boolean[][] = [];
+  const labels: (string | undefined)[][] = [];
+  const ensureRow = (r: number) => {
+    while (taken.length <= r) taken.push([]);
+    while (labels.length <= r) labels.push([]);
+  };
+
+  rows.forEach((tr, r) => {
+    ensureRow(r);
+    let c = 0;
+    Array.from(tr.children).forEach((cell) => {
+      while (taken[r][c]) c++;
+      const th = cell as HTMLTableCellElement;
+      const cs = th.colSpan || 1;
+      const rs = th.rowSpan || 1;
+      const text = th.textContent?.trim() ?? '';
+      for (let i = 0; i < rs; i++) {
+        ensureRow(r + i);
+        for (let j = 0; j < cs; j++) {
+          taken[r + i][c + j] = true;
+          if (i === 0 && j === 0) {
+            labels[r + i][c + j] = text;
+          }
+        }
+      }
+      c += cs;
+    });
+  });
+
+  const colCount = taken.reduce((m, r) => Math.max(m, r.length), 0);
+  const result: string[] = [];
+  for (let c = 0; c < colCount; c++) {
+    const parts: string[] = [];
+    for (let r = 0; r < rows.length; r++) {
+      const v = labels[r]?.[c];
+      if (v && !parts.includes(v)) parts.push(v);
+    }
+    result.push(parts.join('/'));
+  }
+  return result;
+}
+
+/**
+ * Find a human title for a table: nearest heading in the closest section-ish
+ * ancestor (panel/card), else <caption>, else empty.
+ */
+function findTableTitle(table: Element): string {
+  const caption = table.querySelector('caption')?.textContent?.trim();
+  if (caption) return caption;
+
+  const section = table.closest(
+    'section, article, [class*="panel"], [class*="card"], [class*="Panel"], [class*="module"]'
+  );
+  if (section) {
+    const heading = section.querySelector('h1, h2, h3, h4, h5, h6');
+    const text = heading?.textContent?.trim();
+    if (text) return text.slice(0, 80);
+  }
+
+  // Fall back to the nearest preceding heading in document order.
+  let node: Element | null = table;
+  while (node) {
+    let sib: Element | null = node.previousElementSibling;
+    while (sib) {
+      const h = sib.matches('h1,h2,h3,h4,h5,h6')
+        ? sib
+        : sib.querySelector('h1, h2, h3, h4, h5, h6');
+      if (h) return (h.textContent?.trim() ?? '').slice(0, 80);
+      sib = sib.previousElementSibling;
+    }
+    node = node.parentElement;
+  }
+  return '';
+}
+
+/**
+ * Collect all plain data tables on the page (any framework, not just Ant
+ * Design). Below-fold tables are included — only truly hidden ones are
+ * skipped. Returns structured data (not text) so callers can build either
+ * compact summaries or full detail views.
+ */
+function collectDataTableData(): DataTableData[] {
+  const tables = Array.from(document.querySelectorAll('table'));
+  const result: DataTableData[] = [];
+
+  for (const table of tables) {
+    if (result.length >= MAX_TABLES) break;
+    if (isSDKElement(table)) continue;
+
+    try {
+      const style = window.getComputedStyle(table);
+      if (style.display === 'none' || style.visibility === 'hidden') continue;
+      const rect = table.getBoundingClientRect();
+      if (rect.width === 0 || rect.height === 0) continue;
+    } catch {
+      continue;
+    }
+
+    // Skip pure layout tables with no body data (e.g. calendar pickers).
+    const bodyRows = Array.from(table.querySelectorAll('tbody > tr')).filter(
+      (tr) =>
+        !tr.classList.contains('ant-table-measure-row') &&
+        tr.getAttribute('aria-hidden') !== 'true' &&
+        (tr.textContent?.trim() ?? '').length > 0
+    );
+    if (bodyRows.length === 0) continue;
+
+    const rows = bodyRows
+      .map((tr) =>
+        Array.from(tr.children).map(
+          (td) => (td.textContent ?? '').trim().replace(/\s+/g, ' ')
+        )
+      )
+      .filter((cells) => cells.some((c) => c.length > 0));
+
+    if (rows.length === 0) continue;
+
+    result.push({
+      table,
+      title: findTableTitle(table),
+      headers: computeHeaderLabels(table),
+      rows,
+    });
+  }
+
+  return result;
+}
+
+/**
+ * Generalized nearest-title lookup used by tables, charts and text blocks.
+ */
+function findNearestTitle(el: Element): string {
+  const section = el.closest(
+    'section, article, [class*="panel"], [class*="card"], [class*="Panel"], [class*="module"]'
+  );
+  if (section) {
+    const heading = section.querySelector('h1, h2, h3, h4, h5, h6');
+    const text = heading?.textContent?.trim();
+    if (text) return text.slice(0, 80);
+  }
+
+  let node: Element | null = el;
+  while (node) {
+    let sib: Element | null = node.previousElementSibling;
+    while (sib) {
+      const h = sib.matches('h1,h2,h3,h4,h5,h6')
+        ? sib
+        : sib.querySelector('h1, h2, h3, h4, h5, h6');
+      if (h) return (h.textContent?.trim() ?? '').slice(0, 80);
+      sib = sib.previousElementSibling;
+    }
+    node = node.parentElement;
+  }
+  return '';
+}
+
+interface ChartData {
+  el: Element;
+  title: string;
+  option: Record<string, unknown> | null;
+  series: Array<Record<string, unknown>>;
+}
+
+/**
+ * Detect rendered ECharts instances on the page. Their data lives in JS
+ * (echarts option), not in the DOM — extract it via the global registry
+ * when reachable (pages that expose window.echarts).
+ */
+function collectChartData(): ChartData[] {
+  const els = Array.from(document.querySelectorAll('[_echarts_instance_]'));
+  const result: ChartData[] = [];
+
+  for (const el of els) {
+    if (result.length >= MAX_TABLES) break;
+    if (isSDKElement(el)) continue;
+
+    let option: Record<string, unknown> | null = null;
+    try {
+      const style = window.getComputedStyle(el);
+      if (style.display === 'none' || style.visibility === 'hidden') continue;
+      const echarts = (window as unknown as { echarts?: { getInstanceByDom?: (e: Element) => { getOption?: () => Record<string, unknown> } | undefined } }).echarts;
+      if (echarts?.getInstanceByDom) {
+        option = echarts.getInstanceByDom(el)?.getOption?.() ?? null;
+      }
+    } catch {
+      // option stays null — chart marked unreadable below
+    }
+
+    const titleOpt = (option as { title?: { text?: string } } | null)?.title?.text;
+    const title =
+      (typeof titleOpt === 'string' && titleOpt) ||
+      el.getAttribute('aria-label') ||
+      el.closest('[aria-label]')?.getAttribute('aria-label') ||
+      findNearestTitle(el);
+
+    const series = Array.isArray(option?.series)
+      ? (option!.series as Array<Record<string, unknown>>)
+      : [];
+
+    result.push({ el, title: title || '', option, series });
+  }
+
+  return result;
+}
+
+interface TextBlockData {
+  el: Element;
+  title: string;
+  own_text: string;  // text with tables and chart containers stripped
+}
+
+/** Candidate containers that usually hold human-readable content. */
+const TEXT_BLOCK_SELECTOR =
+  'main, article, section, [class*="md"], [class*="body"], [class*="content"], ' +
+  '[class*="summary"], [class*="insight"], [class*="report"], [class*="metric"], ' +
+  '[class*="card"], [class*="panel"], pre, blockquote';
+
+const MAX_TEXT_BLOCKS = 20;
+const MIN_TEXT_BLOCK_CHARS = 60;
+
+/**
+ * Collect significant read-only text blocks (summaries, insight sections,
+ * KPI cards, markdown bodies). Only "leaf" containers are kept — when one
+ * candidate contains another, the more specific inner one wins, so the
+ * same text never appears twice.
+ */
+function collectTextBlocks(): TextBlockData[] {
+  const candidates = Array.from(document.querySelectorAll(TEXT_BLOCK_SELECTOR));
+  const kept: TextBlockData[] = [];
+
+  for (const el of candidates) {
+    if (kept.length >= MAX_TEXT_BLOCKS * 3) break; // coarse pre-filter, dedupe below
+    if (isSDKElement(el)) continue;
+    try {
+      const style = window.getComputedStyle(el);
+      if (style.display === 'none' || style.visibility === 'hidden') continue;
+    } catch {
+      continue;
+    }
+
+    // "Own text": clone and strip tables / chart containers — those are
+    // discoverable separately, so they shouldn't pollute a text block.
+    const clone = el.cloneNode(true) as HTMLElement;
+    clone.querySelectorAll('table, [_echarts_instance_]').forEach((n) => n.remove());
+    const text = (clone.textContent ?? '').replace(/\s+/g, ' ').trim();
+    if (text.length < MIN_TEXT_BLOCK_CHARS) continue;
+
+    kept.push({ el, title: findNearestTitle(el), own_text: text });
+  }
+
+  // Nested-dedupe: if A contains B, keep B (more specific).
+  return kept
+    .filter((a) => !kept.some((b) => b !== a && a.el.contains(b.el)))
+    .slice(0, MAX_TEXT_BLOCKS);
+}
+
+/**
+ * Collect the page module structure: every visible heading (h1-h6), in
+ * document order, excluding SDK-injected UI. Gives the agent a complete
+ * map of page sections at a glance.
+ */
+function extractPageOutline(): PageOutlineItem[] {
+  const headings = document.querySelectorAll('h1, h2, h3, h4, h5, h6');
+  const outline: PageOutlineItem[] = [];
+  headings.forEach((h) => {
+    if (outline.length >= 40) return;
+    if (isSDKElement(h)) return;
+    const text = h.textContent?.trim().replace(/\s+/g, ' ') ?? '';
+    if (!text) return;
+    try {
+      const style = window.getComputedStyle(h);
+      if (style.display === 'none' || style.visibility === 'hidden') return;
+    } catch {
+      return;
+    }
+    outline.push({ level: parseInt(h.tagName[1], 10), text: text.slice(0, 60) });
+  });
+  return outline;
+}
+
+function joinRow(cells: string[]): string {
+  return cells.join(' | ');
+}
 
 /**
  * Check if an element has click-like interactivity via inline styles or class hints.
@@ -355,6 +665,10 @@ export class PageScanner {
         if (placeholder !== undefined) {
           element.placeholder = placeholder;
         }
+        const value = (el as HTMLInputElement | HTMLTextAreaElement).value;
+        if (value) {
+          element.value = value;
+        }
       }
 
       if (tag === 'a') {
@@ -407,7 +721,11 @@ export class PageScanner {
 
     // 截断策略：超过 200 个时优先保留 visible:true，再补充 visible:false 至 200
     if (all.length <= MAX_ELEMENTS) {
-      return { elements: all, truncated: false };
+      return {
+        elements: all,
+        truncated: false,
+        ...this.buildDiscoverySummaries(),
+      };
     }
 
     const visible = all.filter((e) => e.visible);
@@ -421,7 +739,159 @@ export class PageScanner {
       elements = [...visible, ...invisible.slice(0, remaining)];
     }
 
-    return { elements, truncated: true };
+    return {
+      elements,
+      truncated: true,
+      ...this.buildDiscoverySummaries(),
+    };
+  }
+
+  /**
+   * Overview-level discovery summaries for every readable content block on
+   * the page — tables, charts and text blocks — plus the page outline.
+   * Cheap enough to include in every page_skill call.
+   */
+  private buildDiscoverySummaries(): {
+    page_outline: PageOutlineItem[];
+    data_tables: DataTableSummary[];
+    charts: ChartSummary[];
+    text_blocks: TextBlockSummary[];
+  } {
+    return {
+      page_outline: extractPageOutline(),
+      data_tables: collectDataTableData().map((t, i) => ({
+        id: `table_${String(i + 1).padStart(3, '0')}`,
+        title: t.title,
+        headers: t.headers,
+        col_count: t.headers.length || t.rows[0]?.length || 0,
+        row_count: t.rows.length,
+        preview: t.rows.slice(0, PREVIEW_ROWS).map(joinRow),
+      })),
+      charts: collectChartData().map((c, i) => ({
+        id: `chart_${String(i + 1).padStart(3, '0')}`,
+        title: c.title,
+        types: [...new Set(c.series.map((s) => String(s.type ?? '')).filter(Boolean))],
+        series_names: c.series.map((s) => String(s.name ?? '')).filter(Boolean),
+        data_points: c.option
+          ? c.series.reduce(
+              (sum, s) => sum + (Array.isArray(s.data) ? s.data.length : 0),
+              0
+            )
+          : -1,
+        readable: c.option !== null,
+      })),
+      text_blocks: collectTextBlocks().map((b, i) => ({
+        id: `text_${String(i + 1).padStart(3, '0')}`,
+        title: b.title,
+        chars: b.own_text.length,
+        preview: b.own_text.slice(0, 120),
+      })),
+    };
+  }
+
+  /**
+   * Full content of a single block discovered in an overview scan, addressed
+   * by block_id: "table_001" | "chart_001" | "text_001". Returns null when
+   * the id doesn't match the current DOM (e.g. the page changed) — the
+   * caller should tell the agent to re-scan.
+   */
+  getBlockDetail(blockId: string): Record<string, unknown> | null {
+    if (blockId.startsWith('table_')) return this.getTableDetail(blockId);
+    if (blockId.startsWith('chart_')) return this.getChartDetail(blockId);
+    if (blockId.startsWith('text_')) return this.getTextDetail(blockId);
+    return null;
+  }
+
+  private getTableDetail(tableId: string): Record<string, unknown> | null {
+    const tables = collectDataTableData();
+    const index = parseInt(tableId.replace('table_', ''), 10);
+    if (!Number.isInteger(index) || index < 1 || index > tables.length) {
+      return null;
+    }
+    const t = tables[index - 1];
+
+    const lines: string[] = [];
+    if (t.headers.length > 0) lines.push(t.headers.join(' | '));
+
+    let truncated = false;
+    let used = lines.join('\n').length;
+    for (const row of t.rows) {
+      if (lines.length - (t.headers.length ? 1 : 0) >= MAX_DETAIL_ROWS || used >= MAX_DETAIL_CHARS) {
+        truncated = true;
+        lines.push(`…(共 ${t.rows.length} 行，已截断)`);
+        break;
+      }
+      const line = joinRow(row).slice(0, 400);
+      lines.push(line);
+      used += line.length;
+    }
+
+    return {
+      table_id: tableId,
+      title: t.title,
+      headers: t.headers,
+      row_count: t.rows.length,
+      truncated,
+      content: lines.join('\n'),
+    };
+  }
+
+  private getChartDetail(chartId: string): Record<string, unknown> | null {
+    const charts = collectChartData();
+    const index = parseInt(chartId.replace('chart_', ''), 10);
+    if (!Number.isInteger(index) || index < 1 || index > charts.length) {
+      return null;
+    }
+    const c = charts[index - 1];
+
+    if (!c.option) {
+      return {
+        chart_id: chartId,
+        title: c.title,
+        readable: false,
+        error:
+          'Chart data is not readable: the page does not expose a global echarts registry (window.echarts). Only the chart title is available.',
+      };
+    }
+
+    const xAxis = c.option.xAxis as { data?: unknown[] } | undefined;
+    const yAxis = c.option.yAxis as { data?: unknown[] } | undefined;
+    const categories = xAxis?.data ?? yAxis?.data ?? [];
+
+    const series = c.series.map((s) => ({
+      name: s.name ?? '',
+      type: s.type ?? '',
+      data: Array.isArray(s.data) ? s.data.slice(0, 100) : [],
+    }));
+
+    const optionJson = JSON.stringify(c.option).slice(0, MAX_DETAIL_CHARS);
+
+    return {
+      chart_id: chartId,
+      title: c.title,
+      readable: true,
+      categories,
+      series,
+      option: optionJson,
+    };
+  }
+
+  private getTextDetail(textId: string): Record<string, unknown> | null {
+    const blocks = collectTextBlocks();
+    const index = parseInt(textId.replace('text_', ''), 10);
+    if (!Number.isInteger(index) || index < 1 || index > blocks.length) {
+      return null;
+    }
+    const b = blocks[index - 1];
+    const truncated = b.own_text.length > MAX_DETAIL_CHARS;
+
+    return {
+      text_id: textId,
+      title: b.title,
+      chars: b.own_text.length,
+      truncated,
+      content: truncated ? b.own_text.slice(0, MAX_DETAIL_CHARS) + '…(已截断)' : b.own_text,
+    };
   }
 
   toJSON(elements: DOMElement[]): string {

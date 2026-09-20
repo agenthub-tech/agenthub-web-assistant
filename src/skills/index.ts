@@ -14,13 +14,19 @@ const PAGE_SKILL_SCHEMA = {
   type: 'function',
   function: {
     name: 'page_skill',
-    description: 'Scan the current page to get a snapshot of all interactive DOM elements. Call this before performing any DOM operations to understand the page structure.',
+    description:
+      'Scan the current page. Without block_id: returns the page overview — all interactive DOM elements (dom_snapshot), the page module outline (page_outline), and summaries of every readable content block: data tables (data_tables), charts (charts) and text blocks (text_blocks), each with id, title, size and a short preview. With block_id: returns the full content of that one block (table rows / chart data / full text). Call the overview first, then fetch details only for blocks you actually need.',
     parameters: {
       type: 'object',
       properties: {
         step_description: {
           type: 'string',
           description: 'Brief description of why this scan is needed',
+        },
+        block_id: {
+          type: 'string',
+          description:
+            'Optional. A block id from a previous overview scan (e.g. table_001, chart_001, text_001). When provided, returns the full content of that block instead of the page overview.',
         },
       },
       required: ['step_description'],
@@ -121,6 +127,8 @@ const CLIPBOARD_SKILL_SCHEMA = {
 
 const PAGE_SKILL_PROMPT = `- 每次操作前必须先调用 page_skill 确认当前页面状态
 - 不确定目标元素时，优先用 page_skill 扫描，不要盲目操作
+- 渐进式发现：先做一次不带 block_id 的总览扫描——page_outline 是页面所有模块的标题结构；data_tables / charts / text_blocks 是页面上所有可读内容块的摘要（标题、规模、预览）。需要某个块的完整内容时，再带 block_id 调用 page_skill（如 table_001 取表格全部行、chart_001 取图表数据、text_001 取文本全文）。不要一次性拉取所有块的全文
+- 需要读取页面数据时优先用摘要和 block_id，不要通过点击编辑按钮或滚动去寻找内容
 - 表格内的元素会携带 table 字段（row/col/header），用 header 匹配列名，用 row 定位数据行
 - 表头元素（role: "columnheader"）不可编辑，要操作数据请使用对应行的元素`;
 
@@ -160,9 +168,19 @@ export function buildWebSkills(deps: SkillExecutorDeps): SkillDefinition[] {
       promptInjection: PAGE_SKILL_PROMPT,
       executionMode: 'sdk',
       cache: { enabled: true, ttl: 30000, mode: 'snapshot', invalidateOn: ['urlchange', 'dom:mutation'] },
-      execute: async (_params) => {
-        const { elements, truncated } = pageScanner.scan();
-        return { dom_snapshot: elements, truncated };
+      execute: async (params) => {
+        const blockId = typeof params.block_id === 'string' ? params.block_id.trim() : '';
+        if (blockId) {
+          const detail = pageScanner.getBlockDetail(blockId);
+          if (!detail) {
+            return {
+              error: `Block '${blockId}' not found in the current page. The page may have changed — run an overview scan (page_skill without block_id) first, then use a block id from data_tables / charts / text_blocks.`,
+            };
+          }
+          return detail;
+        }
+        const { elements, truncated, page_outline, data_tables, charts, text_blocks } = pageScanner.scan();
+        return { dom_snapshot: elements, truncated, page_outline, data_tables, charts, text_blocks };
       },
     },
 

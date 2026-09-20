@@ -80961,6 +80961,239 @@
     "[tabindex]"
   ];
   var MAX_ELEMENTS = 200;
+  var MAX_TABLES = 12;
+  var MAX_DETAIL_ROWS = 200;
+  var MAX_DETAIL_CHARS = 2e4;
+  var PREVIEW_ROWS = 2;
+  function computeHeaderLabels(table) {
+    var _a2;
+    const thead = table.querySelector("thead");
+    if (!thead)
+      return [];
+    const rows = Array.from(thead.querySelectorAll("tr"));
+    if (rows.length === 0)
+      return [];
+    const taken = [];
+    const labels = [];
+    const ensureRow = (r) => {
+      while (taken.length <= r)
+        taken.push([]);
+      while (labels.length <= r)
+        labels.push([]);
+    };
+    rows.forEach((tr, r) => {
+      ensureRow(r);
+      let c = 0;
+      Array.from(tr.children).forEach((cell) => {
+        var _a3, _b2;
+        while (taken[r][c])
+          c++;
+        const th = cell;
+        const cs = th.colSpan || 1;
+        const rs = th.rowSpan || 1;
+        const text = (_b2 = (_a3 = th.textContent) == null ? void 0 : _a3.trim()) != null ? _b2 : "";
+        for (let i = 0; i < rs; i++) {
+          ensureRow(r + i);
+          for (let j = 0; j < cs; j++) {
+            taken[r + i][c + j] = true;
+            if (i === 0 && j === 0) {
+              labels[r + i][c + j] = text;
+            }
+          }
+        }
+        c += cs;
+      });
+    });
+    const colCount = taken.reduce((m2, r) => Math.max(m2, r.length), 0);
+    const result = [];
+    for (let c = 0; c < colCount; c++) {
+      const parts = [];
+      for (let r = 0; r < rows.length; r++) {
+        const v = (_a2 = labels[r]) == null ? void 0 : _a2[c];
+        if (v && !parts.includes(v))
+          parts.push(v);
+      }
+      result.push(parts.join("/"));
+    }
+    return result;
+  }
+  function findTableTitle(table) {
+    var _a2, _b2, _c2, _d, _e;
+    const caption = (_b2 = (_a2 = table.querySelector("caption")) == null ? void 0 : _a2.textContent) == null ? void 0 : _b2.trim();
+    if (caption)
+      return caption;
+    const section = table.closest(
+      'section, article, [class*="panel"], [class*="card"], [class*="Panel"], [class*="module"]'
+    );
+    if (section) {
+      const heading = section.querySelector("h1, h2, h3, h4, h5, h6");
+      const text = (_c2 = heading == null ? void 0 : heading.textContent) == null ? void 0 : _c2.trim();
+      if (text)
+        return text.slice(0, 80);
+    }
+    let node = table;
+    while (node) {
+      let sib = node.previousElementSibling;
+      while (sib) {
+        const h = sib.matches("h1,h2,h3,h4,h5,h6") ? sib : sib.querySelector("h1, h2, h3, h4, h5, h6");
+        if (h)
+          return ((_e = (_d = h.textContent) == null ? void 0 : _d.trim()) != null ? _e : "").slice(0, 80);
+        sib = sib.previousElementSibling;
+      }
+      node = node.parentElement;
+    }
+    return "";
+  }
+  function collectDataTableData() {
+    const tables = Array.from(document.querySelectorAll("table"));
+    const result = [];
+    for (const table of tables) {
+      if (result.length >= MAX_TABLES)
+        break;
+      if (isSDKElement(table))
+        continue;
+      try {
+        const style = window.getComputedStyle(table);
+        if (style.display === "none" || style.visibility === "hidden")
+          continue;
+        const rect = table.getBoundingClientRect();
+        if (rect.width === 0 || rect.height === 0)
+          continue;
+      } catch (e2) {
+        continue;
+      }
+      const bodyRows = Array.from(table.querySelectorAll("tbody > tr")).filter(
+        (tr) => {
+          var _a2, _b2;
+          return !tr.classList.contains("ant-table-measure-row") && tr.getAttribute("aria-hidden") !== "true" && ((_b2 = (_a2 = tr.textContent) == null ? void 0 : _a2.trim()) != null ? _b2 : "").length > 0;
+        }
+      );
+      if (bodyRows.length === 0)
+        continue;
+      const rows = bodyRows.map(
+        (tr) => Array.from(tr.children).map(
+          (td) => {
+            var _a2;
+            return ((_a2 = td.textContent) != null ? _a2 : "").trim().replace(/\s+/g, " ");
+          }
+        )
+      ).filter((cells) => cells.some((c) => c.length > 0));
+      if (rows.length === 0)
+        continue;
+      result.push({
+        table,
+        title: findTableTitle(table),
+        headers: computeHeaderLabels(table),
+        rows
+      });
+    }
+    return result;
+  }
+  function findNearestTitle(el) {
+    var _a2, _b2, _c2;
+    const section = el.closest(
+      'section, article, [class*="panel"], [class*="card"], [class*="Panel"], [class*="module"]'
+    );
+    if (section) {
+      const heading = section.querySelector("h1, h2, h3, h4, h5, h6");
+      const text = (_a2 = heading == null ? void 0 : heading.textContent) == null ? void 0 : _a2.trim();
+      if (text)
+        return text.slice(0, 80);
+    }
+    let node = el;
+    while (node) {
+      let sib = node.previousElementSibling;
+      while (sib) {
+        const h = sib.matches("h1,h2,h3,h4,h5,h6") ? sib : sib.querySelector("h1, h2, h3, h4, h5, h6");
+        if (h)
+          return ((_c2 = (_b2 = h.textContent) == null ? void 0 : _b2.trim()) != null ? _c2 : "").slice(0, 80);
+        sib = sib.previousElementSibling;
+      }
+      node = node.parentElement;
+    }
+    return "";
+  }
+  function collectChartData() {
+    var _a2, _b2, _c2, _d, _e;
+    const els = Array.from(document.querySelectorAll("[_echarts_instance_]"));
+    const result = [];
+    for (const el of els) {
+      if (result.length >= MAX_TABLES)
+        break;
+      if (isSDKElement(el))
+        continue;
+      let option = null;
+      try {
+        const style = window.getComputedStyle(el);
+        if (style.display === "none" || style.visibility === "hidden")
+          continue;
+        const echarts = window.echarts;
+        if (echarts == null ? void 0 : echarts.getInstanceByDom) {
+          option = (_c2 = (_b2 = (_a2 = echarts.getInstanceByDom(el)) == null ? void 0 : _a2.getOption) == null ? void 0 : _b2.call(_a2)) != null ? _c2 : null;
+        }
+      } catch (e2) {
+      }
+      const titleOpt = (_d = option == null ? void 0 : option.title) == null ? void 0 : _d.text;
+      const title = typeof titleOpt === "string" && titleOpt || el.getAttribute("aria-label") || ((_e = el.closest("[aria-label]")) == null ? void 0 : _e.getAttribute("aria-label")) || findNearestTitle(el);
+      const series = Array.isArray(option == null ? void 0 : option.series) ? option.series : [];
+      result.push({ el, title: title || "", option, series });
+    }
+    return result;
+  }
+  var TEXT_BLOCK_SELECTOR = 'main, article, section, [class*="md"], [class*="body"], [class*="content"], [class*="summary"], [class*="insight"], [class*="report"], [class*="metric"], [class*="card"], [class*="panel"], pre, blockquote';
+  var MAX_TEXT_BLOCKS = 20;
+  var MIN_TEXT_BLOCK_CHARS = 60;
+  function collectTextBlocks() {
+    var _a2;
+    const candidates = Array.from(document.querySelectorAll(TEXT_BLOCK_SELECTOR));
+    const kept = [];
+    for (const el of candidates) {
+      if (kept.length >= MAX_TEXT_BLOCKS * 3)
+        break;
+      if (isSDKElement(el))
+        continue;
+      try {
+        const style = window.getComputedStyle(el);
+        if (style.display === "none" || style.visibility === "hidden")
+          continue;
+      } catch (e2) {
+        continue;
+      }
+      const clone6 = el.cloneNode(true);
+      clone6.querySelectorAll("table, [_echarts_instance_]").forEach((n) => n.remove());
+      const text = ((_a2 = clone6.textContent) != null ? _a2 : "").replace(/\s+/g, " ").trim();
+      if (text.length < MIN_TEXT_BLOCK_CHARS)
+        continue;
+      kept.push({ el, title: findNearestTitle(el), own_text: text });
+    }
+    return kept.filter((a) => !kept.some((b) => b !== a && a.el.contains(b.el))).slice(0, MAX_TEXT_BLOCKS);
+  }
+  function extractPageOutline() {
+    const headings = document.querySelectorAll("h1, h2, h3, h4, h5, h6");
+    const outline = [];
+    headings.forEach((h) => {
+      var _a2, _b2;
+      if (outline.length >= 40)
+        return;
+      if (isSDKElement(h))
+        return;
+      const text = (_b2 = (_a2 = h.textContent) == null ? void 0 : _a2.trim().replace(/\s+/g, " ")) != null ? _b2 : "";
+      if (!text)
+        return;
+      try {
+        const style = window.getComputedStyle(h);
+        if (style.display === "none" || style.visibility === "hidden")
+          return;
+      } catch (e2) {
+        return;
+      }
+      outline.push({ level: parseInt(h.tagName[1], 10), text: text.slice(0, 60) });
+    });
+    return outline;
+  }
+  function joinRow(cells) {
+    return cells.join(" | ");
+  }
   function isClickable(el) {
     var _a2, _b2, _c2, _d;
     try {
@@ -81231,6 +81464,10 @@
           if (placeholder !== void 0) {
             element.placeholder = placeholder;
           }
+          const value = el.value;
+          if (value) {
+            element.value = value;
+          }
         }
         if (tag === "a") {
           const href = el.getAttribute("href");
@@ -81269,7 +81506,10 @@
         return element;
       });
       if (all.length <= MAX_ELEMENTS) {
-        return { elements: all, truncated: false };
+        return __spreadValues({
+          elements: all,
+          truncated: false
+        }, this.buildDiscoverySummaries());
       }
       const visible = all.filter((e2) => e2.visible);
       const invisible = all.filter((e2) => !e2.visible);
@@ -81280,7 +81520,153 @@
         const remaining = MAX_ELEMENTS - visible.length;
         elements = [...visible, ...invisible.slice(0, remaining)];
       }
-      return { elements, truncated: true };
+      return __spreadValues({
+        elements,
+        truncated: true
+      }, this.buildDiscoverySummaries());
+    }
+    /**
+     * Overview-level discovery summaries for every readable content block on
+     * the page — tables, charts and text blocks — plus the page outline.
+     * Cheap enough to include in every page_skill call.
+     */
+    buildDiscoverySummaries() {
+      return {
+        page_outline: extractPageOutline(),
+        data_tables: collectDataTableData().map((t, i) => {
+          var _a2;
+          return {
+            id: `table_${String(i + 1).padStart(3, "0")}`,
+            title: t.title,
+            headers: t.headers,
+            col_count: t.headers.length || ((_a2 = t.rows[0]) == null ? void 0 : _a2.length) || 0,
+            row_count: t.rows.length,
+            preview: t.rows.slice(0, PREVIEW_ROWS).map(joinRow)
+          };
+        }),
+        charts: collectChartData().map((c, i) => ({
+          id: `chart_${String(i + 1).padStart(3, "0")}`,
+          title: c.title,
+          types: [...new Set(c.series.map((s) => {
+            var _a2;
+            return String((_a2 = s.type) != null ? _a2 : "");
+          }).filter(Boolean))],
+          series_names: c.series.map((s) => {
+            var _a2;
+            return String((_a2 = s.name) != null ? _a2 : "");
+          }).filter(Boolean),
+          data_points: c.option ? c.series.reduce(
+            (sum2, s) => sum2 + (Array.isArray(s.data) ? s.data.length : 0),
+            0
+          ) : -1,
+          readable: c.option !== null
+        })),
+        text_blocks: collectTextBlocks().map((b, i) => ({
+          id: `text_${String(i + 1).padStart(3, "0")}`,
+          title: b.title,
+          chars: b.own_text.length,
+          preview: b.own_text.slice(0, 120)
+        }))
+      };
+    }
+    /**
+     * Full content of a single block discovered in an overview scan, addressed
+     * by block_id: "table_001" | "chart_001" | "text_001". Returns null when
+     * the id doesn't match the current DOM (e.g. the page changed) — the
+     * caller should tell the agent to re-scan.
+     */
+    getBlockDetail(blockId) {
+      if (blockId.startsWith("table_"))
+        return this.getTableDetail(blockId);
+      if (blockId.startsWith("chart_"))
+        return this.getChartDetail(blockId);
+      if (blockId.startsWith("text_"))
+        return this.getTextDetail(blockId);
+      return null;
+    }
+    getTableDetail(tableId) {
+      const tables = collectDataTableData();
+      const index = parseInt(tableId.replace("table_", ""), 10);
+      if (!Number.isInteger(index) || index < 1 || index > tables.length) {
+        return null;
+      }
+      const t = tables[index - 1];
+      const lines = [];
+      if (t.headers.length > 0)
+        lines.push(t.headers.join(" | "));
+      let truncated = false;
+      let used = lines.join("\n").length;
+      for (const row of t.rows) {
+        if (lines.length - (t.headers.length ? 1 : 0) >= MAX_DETAIL_ROWS || used >= MAX_DETAIL_CHARS) {
+          truncated = true;
+          lines.push(`\u2026(\u5171 ${t.rows.length} \u884C\uFF0C\u5DF2\u622A\u65AD)`);
+          break;
+        }
+        const line = joinRow(row).slice(0, 400);
+        lines.push(line);
+        used += line.length;
+      }
+      return {
+        table_id: tableId,
+        title: t.title,
+        headers: t.headers,
+        row_count: t.rows.length,
+        truncated,
+        content: lines.join("\n")
+      };
+    }
+    getChartDetail(chartId) {
+      var _a2, _b2;
+      const charts = collectChartData();
+      const index = parseInt(chartId.replace("chart_", ""), 10);
+      if (!Number.isInteger(index) || index < 1 || index > charts.length) {
+        return null;
+      }
+      const c = charts[index - 1];
+      if (!c.option) {
+        return {
+          chart_id: chartId,
+          title: c.title,
+          readable: false,
+          error: "Chart data is not readable: the page does not expose a global echarts registry (window.echarts). Only the chart title is available."
+        };
+      }
+      const xAxis = c.option.xAxis;
+      const yAxis = c.option.yAxis;
+      const categories = (_b2 = (_a2 = xAxis == null ? void 0 : xAxis.data) != null ? _a2 : yAxis == null ? void 0 : yAxis.data) != null ? _b2 : [];
+      const series = c.series.map((s) => {
+        var _a3, _b3;
+        return {
+          name: (_a3 = s.name) != null ? _a3 : "",
+          type: (_b3 = s.type) != null ? _b3 : "",
+          data: Array.isArray(s.data) ? s.data.slice(0, 100) : []
+        };
+      });
+      const optionJson = JSON.stringify(c.option).slice(0, MAX_DETAIL_CHARS);
+      return {
+        chart_id: chartId,
+        title: c.title,
+        readable: true,
+        categories,
+        series,
+        option: optionJson
+      };
+    }
+    getTextDetail(textId) {
+      const blocks = collectTextBlocks();
+      const index = parseInt(textId.replace("text_", ""), 10);
+      if (!Number.isInteger(index) || index < 1 || index > blocks.length) {
+        return null;
+      }
+      const b = blocks[index - 1];
+      const truncated = b.own_text.length > MAX_DETAIL_CHARS;
+      return {
+        text_id: textId,
+        title: b.title,
+        chars: b.own_text.length,
+        truncated,
+        content: truncated ? b.own_text.slice(0, MAX_DETAIL_CHARS) + "\u2026(\u5DF2\u622A\u65AD)" : b.own_text
+      };
     }
     toJSON(elements) {
       const serialized = elements.map((el) => {
@@ -81419,6 +81805,31 @@
       }
       return { action: "clear", el_id, success: true };
     }
+    /**
+     * Find the largest visible element that actually has scrollable overflow
+     * (scrollHeight > clientHeight). Skips SDK-injected UI (chat panel etc.)
+     * and non-element nodes.
+     */
+    findLargestScrollableContainer() {
+      let best = null;
+      let bestArea = 0;
+      const candidates = document.querySelectorAll("div, main, section");
+      candidates.forEach((el) => {
+        if (el.closest('[data-aa-sdk="true"]'))
+          return;
+        if (el.scrollHeight <= el.clientHeight + 8)
+          return;
+        const rect = el.getBoundingClientRect();
+        if (rect.width <= 0 || rect.height <= 0)
+          return;
+        const area = rect.width * rect.height;
+        if (area > bestArea) {
+          bestArea = area;
+          best = el;
+        }
+      });
+      return best;
+    }
     scroll(el_id, direction, distance2) {
       if (direction !== "up" && direction !== "down") {
         return {
@@ -81431,6 +81842,20 @@
       const delta = direction === "down" ? distance2 : -distance2;
       if (el_id === "window") {
         window.scrollBy({ top: delta, behavior: "smooth" });
+        const docScrollable = document.documentElement.scrollHeight > window.innerHeight + 8;
+        if (!docScrollable) {
+          const container = this.findLargestScrollableContainer();
+          if (container) {
+            container.scrollBy({ top: delta, behavior: "smooth" });
+            return {
+              action: "scroll",
+              el_id,
+              success: true,
+              scrollTop: Math.round(container.scrollTop),
+              scrolled_container: true
+            };
+          }
+        }
         return {
           action: "scroll",
           el_id,
@@ -83167,13 +83592,17 @@
     type: "function",
     function: {
       name: "page_skill",
-      description: "Scan the current page to get a snapshot of all interactive DOM elements. Call this before performing any DOM operations to understand the page structure.",
+      description: "Scan the current page. Without block_id: returns the page overview \u2014 all interactive DOM elements (dom_snapshot), the page module outline (page_outline), and summaries of every readable content block: data tables (data_tables), charts (charts) and text blocks (text_blocks), each with id, title, size and a short preview. With block_id: returns the full content of that one block (table rows / chart data / full text). Call the overview first, then fetch details only for blocks you actually need.",
       parameters: {
         type: "object",
         properties: {
           step_description: {
             type: "string",
             description: "Brief description of why this scan is needed"
+          },
+          block_id: {
+            type: "string",
+            description: "Optional. A block id from a previous overview scan (e.g. table_001, chart_001, text_001). When provided, returns the full content of that block instead of the page overview."
           }
         },
         required: ["step_description"]
@@ -83268,6 +83697,8 @@
   };
   var PAGE_SKILL_PROMPT = `- \u6BCF\u6B21\u64CD\u4F5C\u524D\u5FC5\u987B\u5148\u8C03\u7528 page_skill \u786E\u8BA4\u5F53\u524D\u9875\u9762\u72B6\u6001
 - \u4E0D\u786E\u5B9A\u76EE\u6807\u5143\u7D20\u65F6\uFF0C\u4F18\u5148\u7528 page_skill \u626B\u63CF\uFF0C\u4E0D\u8981\u76F2\u76EE\u64CD\u4F5C
+- \u6E10\u8FDB\u5F0F\u53D1\u73B0\uFF1A\u5148\u505A\u4E00\u6B21\u4E0D\u5E26 block_id \u7684\u603B\u89C8\u626B\u63CF\u2014\u2014page_outline \u662F\u9875\u9762\u6240\u6709\u6A21\u5757\u7684\u6807\u9898\u7ED3\u6784\uFF1Bdata_tables / charts / text_blocks \u662F\u9875\u9762\u4E0A\u6240\u6709\u53EF\u8BFB\u5185\u5BB9\u5757\u7684\u6458\u8981\uFF08\u6807\u9898\u3001\u89C4\u6A21\u3001\u9884\u89C8\uFF09\u3002\u9700\u8981\u67D0\u4E2A\u5757\u7684\u5B8C\u6574\u5185\u5BB9\u65F6\uFF0C\u518D\u5E26 block_id \u8C03\u7528 page_skill\uFF08\u5982 table_001 \u53D6\u8868\u683C\u5168\u90E8\u884C\u3001chart_001 \u53D6\u56FE\u8868\u6570\u636E\u3001text_001 \u53D6\u6587\u672C\u5168\u6587\uFF09\u3002\u4E0D\u8981\u4E00\u6B21\u6027\u62C9\u53D6\u6240\u6709\u5757\u7684\u5168\u6587
+- \u9700\u8981\u8BFB\u53D6\u9875\u9762\u6570\u636E\u65F6\u4F18\u5148\u7528\u6458\u8981\u548C block_id\uFF0C\u4E0D\u8981\u901A\u8FC7\u70B9\u51FB\u7F16\u8F91\u6309\u94AE\u6216\u6EDA\u52A8\u53BB\u5BFB\u627E\u5185\u5BB9
 - \u8868\u683C\u5185\u7684\u5143\u7D20\u4F1A\u643A\u5E26 table \u5B57\u6BB5\uFF08row/col/header\uFF09\uFF0C\u7528 header \u5339\u914D\u5217\u540D\uFF0C\u7528 row \u5B9A\u4F4D\u6570\u636E\u884C
 - \u8868\u5934\u5143\u7D20\uFF08role: "columnheader"\uFF09\u4E0D\u53EF\u7F16\u8F91\uFF0C\u8981\u64CD\u4F5C\u6570\u636E\u8BF7\u4F7F\u7528\u5BF9\u5E94\u884C\u7684\u5143\u7D20`;
   var DOM_SKILL_PROMPT = `- \u64CD\u4F5C\u5143\u7D20\u65F6\u53EA\u4F7F\u7528 el_id \u5F15\u7528\uFF0C\u4E0D\u8981\u81EA\u884C\u6784\u9020 CSS selector
@@ -83287,9 +83718,19 @@
         promptInjection: PAGE_SKILL_PROMPT,
         executionMode: "sdk",
         cache: { enabled: true, ttl: 3e4, mode: "snapshot", invalidateOn: ["urlchange", "dom:mutation"] },
-        execute: async (_params) => {
-          const { elements, truncated } = pageScanner.scan();
-          return { dom_snapshot: elements, truncated };
+        execute: async (params) => {
+          const blockId = typeof params.block_id === "string" ? params.block_id.trim() : "";
+          if (blockId) {
+            const detail = pageScanner.getBlockDetail(blockId);
+            if (!detail) {
+              return {
+                error: `Block '${blockId}' not found in the current page. The page may have changed \u2014 run an overview scan (page_skill without block_id) first, then use a block id from data_tables / charts / text_blocks.`
+              };
+            }
+            return detail;
+          }
+          const { elements, truncated, page_outline, data_tables, charts, text_blocks } = pageScanner.scan();
+          return { dom_snapshot: elements, truncated, page_outline, data_tables, charts, text_blocks };
         }
       },
       // 2. DOMSkill

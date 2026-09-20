@@ -11,6 +11,8 @@ export interface ExecuteResult {
   error?: string;
   value?: string;
   scrollTop?: number;
+  /** True when the page itself doesn't scroll and an inner container was scrolled instead. */
+  scrolled_container?: boolean;
 }
 
 export class DOMExecutor {
@@ -151,6 +153,33 @@ export class DOMExecutor {
     return { action: 'clear', el_id, success: true };
   }
 
+  /**
+   * Find the largest visible element that actually has scrollable overflow
+   * (scrollHeight > clientHeight). Skips SDK-injected UI (chat panel etc.)
+   * and non-element nodes.
+   */
+  private findLargestScrollableContainer(): HTMLElement | null {
+    let best: HTMLElement | null = null;
+    let bestArea = 0;
+
+    const candidates = document.querySelectorAll<HTMLElement>('div, main, section');
+    candidates.forEach((el) => {
+      if (el.closest('[data-aa-sdk="true"]')) return;
+      if (el.scrollHeight <= el.clientHeight + 8) return;
+
+      const rect = el.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) return;
+
+      const area = rect.width * rect.height;
+      if (area > bestArea) {
+        bestArea = area;
+        best = el;
+      }
+    });
+
+    return best;
+  }
+
   scroll(el_id: string, direction: string, distance: number): ExecuteResult {
     if (direction !== 'up' && direction !== 'down') {
       return {
@@ -165,6 +194,25 @@ export class DOMExecutor {
 
     if (el_id === 'window') {
       window.scrollBy({ top: delta, behavior: 'smooth' });
+
+      // App-shell layouts often scroll inside a dedicated container while the
+      // document itself never scrolls (window.scrollY stays 0). Fall back to
+      // the largest scrollable container so "scroll window" still works.
+      const docScrollable =
+        document.documentElement.scrollHeight > window.innerHeight + 8;
+      if (!docScrollable) {
+        const container = this.findLargestScrollableContainer();
+        if (container) {
+          container.scrollBy({ top: delta, behavior: 'smooth' });
+          return {
+            action: 'scroll',
+            el_id,
+            success: true,
+            scrollTop: Math.round(container.scrollTop),
+            scrolled_container: true,
+          };
+        }
+      }
       return {
         action: 'scroll',
         el_id,
