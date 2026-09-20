@@ -459,11 +459,13 @@ function wireEmitterToUI(
   emitter.on('ToolCallStart', (event: any) => {
     const payload = event.payload;
     const stepDesc = payload?.step_description as string | undefined;
-    // Text streamed before a tool call is internal preamble. The backend never
-    // closes it with TextMessageEnd by design (consumers discard it), so drop
-    // the open bubble here instead of leaving orphan narration on screen.
+    // Text streamed before a tool call is a user-visible progress message
+    // (e.g. "让我查看页面数据..."). Keep it as a completed bubble instead of
+    // deleting it — removing it makes messages appear to be "overwritten" by
+    // the next one. The backend never sends TextMessageEnd for it, so we
+    // finalize the open bubble here.
     if (currentMsgId !== null) {
-      chatPanel.removeMessage(currentMsgId);
+      chatPanel.setMessageState(currentMsgId, 'done');
       currentMsgId = null;
     }
     stepTracker.addStep(payload.tool_call_id, payload.tool_name, stepDesc ? { step_description: stepDesc } : undefined);
