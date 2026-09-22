@@ -43,16 +43,21 @@ export interface TextBlockSummary {
     chars: number;
     preview: string;
 }
+export interface RegionSummary {
+    id: string;
+    name: string;
+    type: string;
+    element_count: number;
+    visible: boolean;
+    has_actions: string[];
+    preview: string;
+    container_selector: string;
+}
 export interface ScanResult {
     elements: DOMElement[];
     truncated: boolean;
-    /** Page module structure: all visible headings, in document order. */
     page_outline?: PageOutlineItem[];
-    /**
-     * Content discovery summaries — tables, charts and text blocks found on
-     * the page. Full content is fetched on demand via page_skill(block_id),
-     * keeping the overview payload small (progressive discovery).
-     */
+    regions?: RegionSummary[];
     data_tables?: DataTableSummary[];
     charts?: ChartSummary[];
     text_blocks?: TextBlockSummary[];

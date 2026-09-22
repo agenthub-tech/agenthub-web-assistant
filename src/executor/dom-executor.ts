@@ -45,10 +45,36 @@ export class DOMExecutor {
       return { action: 'click', el_id, success: false, error: result.error };
     }
 
+    let targetEl = result.domEl as HTMLElement;
+
+    // Ant Design Select: clicking the inner <input> only focuses the search box,
+    // it does NOT open the dropdown. The actual trigger is the .ant-select-selector
+    // container. Redirect the click to the correct element.
+    let isAntSelect = false;
+    if (targetEl.tagName === 'INPUT' && targetEl.classList.contains('ant-select-selection-search-input')) {
+      const selector = targetEl.closest('.ant-select-selector') as HTMLElement | null;
+      if (selector) {
+        targetEl = selector;
+        isAntSelect = true;
+      } else {
+        const selectContainer = targetEl.closest('.ant-select') as HTMLElement | null;
+        if (selectContainer) {
+          targetEl = selectContainer;
+          isAntSelect = true;
+        }
+      }
+    }
+
     try {
-      (result.domEl as HTMLElement).click();
+      targetEl.click();
     } catch {
-      result.domEl.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+      targetEl.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    }
+
+    // Ant Design Select also listens to mousedown for dropdown toggle.
+    // Dispatch it as well to ensure the dropdown opens reliably.
+    if (isAntSelect) {
+      targetEl.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
     }
 
     return { action: 'click', el_id, success: true };

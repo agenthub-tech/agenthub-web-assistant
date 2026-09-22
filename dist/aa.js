@@ -81194,6 +81194,131 @@
   function joinRow(cells) {
     return cells.join(" | ");
   }
+  var REGION_CONTAINERS = [
+    { selector: 'dialog, [role="dialog"], .ant-modal, .el-dialog', type: "dialog" },
+    { selector: '.ant-tabs, .el-tabs, [role="tablist"]', type: "tabs" },
+    { selector: "form, .ant-form, .el-form", type: "form" },
+    { selector: "table, .ant-table, .el-table", type: "table" },
+    { selector: 'nav, [role="navigation"], .ant-menu, .el-menu', type: "nav" },
+    { selector: 'main, article, [role="main"]', type: "content" },
+    { selector: 'section, .ant-card, .el-card, [class*="panel"]', type: "content" }
+  ];
+  var _regionContainerMap = /* @__PURE__ */ new Map();
+  function extractRegions(elements) {
+    var _a2, _b2, _c2;
+    const regions = [];
+    const assigned = /* @__PURE__ */ new Set();
+    _regionContainerMap.clear();
+    for (const { selector: selector2, type } of REGION_CONTAINERS) {
+      const containers = document.querySelectorAll(selector2);
+      for (const container of Array.from(containers)) {
+        if (isSDKElement(container))
+          continue;
+        let dominated = false;
+        for (const [, existingContainer] of _regionContainerMap) {
+          if (existingContainer !== container && existingContainer.contains(container)) {
+            dominated = true;
+            break;
+          }
+        }
+        if (dominated)
+          continue;
+        const regionElements = elements.filter((el) => {
+          if (assigned.has(el.selector))
+            return false;
+          const domEl = document.querySelector(el.selector);
+          return domEl && container.contains(domEl);
+        });
+        if (regionElements.length === 0)
+          continue;
+        regionElements.forEach((el) => assigned.add(el.selector));
+        let visible = true;
+        try {
+          const style = window.getComputedStyle(container);
+          visible = style.display !== "none" && style.visibility !== "hidden";
+        } catch (e2) {
+        }
+        const heading = container.querySelector("h1, h2, h3, h4, h5, h6, .ant-card-head-title, .el-card__header");
+        const name = ((_a2 = heading == null ? void 0 : heading.textContent) == null ? void 0 : _a2.trim().slice(0, 40)) || ((_c2 = (_b2 = regionElements[0]) == null ? void 0 : _b2.text) == null ? void 0 : _c2.slice(0, 40)) || type;
+        const actionSet = /* @__PURE__ */ new Set();
+        for (const el of regionElements) {
+          if (el.text && isActionText(el.text))
+            actionSet.add(el.text);
+        }
+        const preview = regionElements.slice(0, 6).map((el) => el.text || el.label || el.type).filter(Boolean).join(" | ").slice(0, 120);
+        const regionId = `region_${String(regions.length + 1).padStart(3, "0")}`;
+        _regionContainerMap.set(regionId, container);
+        regions.push({
+          id: regionId,
+          name,
+          type,
+          element_count: regionElements.length,
+          visible,
+          has_actions: Array.from(actionSet),
+          preview,
+          container_selector: selector2
+        });
+      }
+    }
+    const unassigned = elements.filter((el) => !assigned.has(el.selector));
+    if (unassigned.length > 0) {
+      const actionSet = /* @__PURE__ */ new Set();
+      for (const el of unassigned) {
+        if (el.text && isActionText(el.text))
+          actionSet.add(el.text);
+      }
+      const preview = unassigned.slice(0, 6).map((el) => el.text || el.label || el.type).filter(Boolean).join(" | ").slice(0, 120);
+      regions.push({
+        id: `region_${String(regions.length + 1).padStart(3, "0")}`,
+        name: "\u5176\u4ED6",
+        type: "other",
+        element_count: unassigned.length,
+        visible: true,
+        has_actions: Array.from(actionSet),
+        preview,
+        container_selector: ""
+      });
+    }
+    return regions;
+  }
+  function stableHash(str) {
+    let hash = 0;
+    for (let i = 0; i < str.length; i++) {
+      const char = str.charCodeAt(i);
+      hash = (hash << 5) - hash + char | 0;
+    }
+    return (hash >>> 0).toString(16).slice(-4).padStart(4, "0");
+  }
+  function isActionText(text) {
+    const actionWords = [
+      "\u4FEE\u6539",
+      "\u5220\u9664",
+      "\u7F16\u8F91",
+      "\u67E5\u770B",
+      "\u8BE6\u60C5",
+      "\u5BA1\u6279",
+      "\u9A73\u56DE",
+      "\u901A\u8FC7",
+      "\u786E\u8BA4",
+      "\u53D6\u6D88",
+      "\u542F\u7528",
+      "\u505C\u7528",
+      "\u4E0B\u8F7D",
+      "\u5BFC\u51FA",
+      "\u6253\u5370",
+      "\u590D\u5236"
+    ];
+    return actionWords.some((w) => text === w);
+  }
+  function isRowAction(el) {
+    var _a2, _b2;
+    const tag = el.tagName.toLowerCase();
+    if (tag === "a" || tag === "button")
+      return true;
+    const text = (_b2 = (_a2 = el.textContent) == null ? void 0 : _a2.trim()) != null ? _b2 : "";
+    const actionWords = ["\u4FEE\u6539", "\u5220\u9664", "\u7F16\u8F91", "\u67E5\u770B", "\u8BE6\u60C5", "\u5BA1\u6279", "\u9A73\u56DE", "\u901A\u8FC7", "\u786E\u8BA4", "\u53D6\u6D88"];
+    return actionWords.some((w) => text === w || text.startsWith(w));
+  }
   function isClickable(el) {
     var _a2, _b2, _c2, _d;
     try {
@@ -81411,12 +81536,15 @@
           raw.push(el);
         }
       });
-      const allElements = document.querySelectorAll("div, span, li, img, svg, label");
+      const allElements = document.querySelectorAll("div, span, li, img, svg, label, a");
       allElements.forEach((el) => {
         if (!isSDKElement(el) && !raw.includes(el) && isClickable(el)) {
           let dominated = false;
           for (const existing of raw) {
             if (existing.contains(el) && existing !== el) {
+              if (existing.tagName === "TR" && isRowAction(el)) {
+                continue;
+              }
               dominated = true;
               break;
             }
@@ -81431,14 +81559,24 @@
         if (!isSDKElement(tr) && !raw.includes(tr) && isVisible(tr)) {
           raw.push(tr);
         }
+        const allDescendants = tr.querySelectorAll('a, button, [role="button"], span, div, td');
+        allDescendants.forEach((actionEl) => {
+          var _a2, _b2;
+          if (!isSDKElement(actionEl) && !raw.includes(actionEl) && isVisible(actionEl)) {
+            const text = (_b2 = (_a2 = actionEl.textContent) == null ? void 0 : _a2.trim()) != null ? _b2 : "";
+            if (isActionText(text) && actionEl.children.length === 0) {
+              raw.push(actionEl);
+            }
+          }
+        });
       });
       const unique = Array.from(new Set(raw));
-      const all = unique.map((el, i) => {
+      const all = unique.map((el) => {
         var _a2, _b2;
-        const id = `el_${String(i + 1).padStart(3, "0")}`;
+        const selector2 = buildSelector(el);
+        const id = `el_${stableHash(selector2)}`;
         const tag = el.tagName.toLowerCase();
         let type = getElementType(el);
-        const selector2 = buildSelector(el);
         const visible2 = isVisible(el);
         let text = null;
         if (tag === "tr" && el.closest("tbody")) {
@@ -81508,7 +81646,8 @@
       if (all.length <= MAX_ELEMENTS) {
         return __spreadValues({
           elements: all,
-          truncated: false
+          truncated: false,
+          regions: extractRegions(all)
         }, this.buildDiscoverySummaries());
       }
       const visible = all.filter((e2) => e2.visible);
@@ -81522,7 +81661,8 @@
       }
       return __spreadValues({
         elements,
-        truncated: true
+        truncated: true,
+        regions: extractRegions(elements)
       }, this.buildDiscoverySummaries());
     }
     /**
@@ -81570,10 +81710,60 @@
       };
     }
     /**
+     * 搜索页面元素：按关键词在所有元素中做全文匹配。
+     * 匹配字段：text / label / placeholder / value / selector / table.header。
+     * 支持多关键词（空格分隔，AND 语义）。
+     * 返回匹配的元素列表（含 el_id/type/text/label/table 上下文），按相关度排序。
+     */
+    searchElements(query) {
+      var _a2, _b2, _c2, _d, _e;
+      const { elements } = this.scan();
+      const keywords = query.toLowerCase().split(/\s+/).filter(Boolean);
+      if (keywords.length === 0)
+        return { query, match_count: 0, elements: [] };
+      const scored = [];
+      for (const el of elements) {
+        const searchable = [
+          el.text,
+          el.label,
+          el.placeholder,
+          el.value,
+          el.selector,
+          (_a2 = el.table) == null ? void 0 : _a2.header,
+          el.type,
+          el.role
+        ].filter(Boolean).join(" ").toLowerCase();
+        let score = 0;
+        let allMatched = true;
+        for (const kw of keywords) {
+          if (searchable.includes(kw)) {
+            score += 1;
+            if (((_b2 = el.text) == null ? void 0 : _b2.toLowerCase()) === kw || ((_c2 = el.label) == null ? void 0 : _c2.toLowerCase()) === kw) {
+              score += 3;
+            } else if (((_d = el.text) == null ? void 0 : _d.toLowerCase().includes(kw)) || ((_e = el.label) == null ? void 0 : _e.toLowerCase().includes(kw))) {
+              score += 2;
+            }
+          } else {
+            allMatched = false;
+            break;
+          }
+        }
+        if (allMatched && score > 0) {
+          scored.push({ el, score });
+        }
+      }
+      scored.sort((a, b) => b.score - a.score);
+      const matched = scored.slice(0, 30).map(({ el }) => el);
+      return {
+        query,
+        match_count: matched.length,
+        elements: matched
+      };
+    }
+    /**
      * Full content of a single block discovered in an overview scan, addressed
-     * by block_id: "table_001" | "chart_001" | "text_001". Returns null when
-     * the id doesn't match the current DOM (e.g. the page changed) — the
-     * caller should tell the agent to re-scan.
+     * by block_id: "table_001" | "chart_001" | "text_001" | "region_001" | "el_001".
+     * Returns null when the id doesn't match the current DOM.
      */
     getBlockDetail(blockId) {
       if (blockId.startsWith("table_"))
@@ -81582,7 +81772,108 @@
         return this.getChartDetail(blockId);
       if (blockId.startsWith("text_"))
         return this.getTextDetail(blockId);
+      if (blockId.startsWith("region_"))
+        return this.getRegionElements(blockId);
+      if (blockId.startsWith("el_"))
+        return this.getElementDetail(blockId);
       return null;
+    }
+    /**
+     * 查看某个区域内的交互元素列表（渐进式披露第二层）。
+     * region_id 来自总览扫描的 regions 字段。
+     * 用 extractRegions 时存的容器元素引用匹配，不用索引猜选择器。
+     */
+    getRegionElements(regionId) {
+      const { elements } = this.scan();
+      const regions = extractRegions(elements);
+      const region = regions.find((r) => r.id === regionId);
+      if (!region)
+        return null;
+      if (region.type === "other") {
+        const otherElements = elements.filter((el) => {
+          for (const [, container2] of _regionContainerMap) {
+            const domEl = document.querySelector(el.selector);
+            if (domEl && container2.contains(domEl))
+              return false;
+          }
+          return true;
+        });
+        return {
+          region_id: regionId,
+          name: region.name,
+          type: region.type,
+          element_count: otherElements.length,
+          elements: otherElements.slice(0, 50)
+        };
+      }
+      const container = _regionContainerMap.get(regionId);
+      if (!container)
+        return null;
+      const regionElements = elements.filter((el) => {
+        const domEl = document.querySelector(el.selector);
+        return domEl && container.contains(domEl);
+      });
+      return {
+        region_id: regionId,
+        name: region.name,
+        type: region.type,
+        element_count: regionElements.length,
+        elements: regionElements.slice(0, 50)
+      };
+    }
+    /**
+     * 查看单个元素的完整内容（渐进式披露第三层）。
+     * el_id 来自 dom_snapshot 或区域元素列表。
+     */
+    getElementDetail(elId) {
+      var _a2, _b2;
+      const { elements } = this.scan();
+      const element = elements.find((e2) => e2.id === elId);
+      if (!element)
+        return null;
+      const domEl = document.querySelector(element.selector);
+      if (!domEl)
+        return { el_id: elId, error: "\u5143\u7D20\u5728\u5F53\u524D DOM \u4E2D\u4E0D\u5B58\u5728\uFF08\u9875\u9762\u53EF\u80FD\u5DF2\u53D8\u5316\uFF09" };
+      const outerHTML = domEl.outerHTML.slice(0, 2e3);
+      const style = window.getComputedStyle(domEl);
+      const computedStyle = {
+        display: style.display,
+        visibility: style.visibility,
+        cursor: style.cursor,
+        pointerEvents: style.pointerEvents,
+        opacity: style.opacity,
+        zIndex: style.zIndex
+      };
+      const ancestors = [];
+      let node = domEl.parentElement;
+      while (node && ancestors.length < 5) {
+        const tag = node.tagName.toLowerCase();
+        const cls = (_b2 = (_a2 = node.className) == null ? void 0 : _a2.toString().split(" ").slice(0, 3).join(".")) != null ? _b2 : "";
+        ancestors.push(cls ? `${tag}.${cls}` : tag);
+        node = node.parentElement;
+      }
+      const children = Array.from(domEl.children).slice(0, 10).map((child) => {
+        var _a3, _b3, _c2, _d;
+        return {
+          tag: child.tagName.toLowerCase(),
+          text: (_b3 = (_a3 = child.textContent) == null ? void 0 : _a3.trim().slice(0, 50)) != null ? _b3 : "",
+          class: (_d = (_c2 = child.className) == null ? void 0 : _c2.toString().slice(0, 60)) != null ? _d : ""
+        };
+      });
+      return {
+        el_id: elId,
+        type: element.type,
+        text: element.text,
+        selector: element.selector,
+        visible: element.visible,
+        events: element.events,
+        label: element.label,
+        table: element.table,
+        outerHTML,
+        computedStyle,
+        ancestors,
+        children
+      };
     }
     getTableDetail(tableId) {
       const tables = collectDataTableData();
@@ -81720,10 +82011,28 @@
       if ("error" in result) {
         return { action: "click", el_id, success: false, error: result.error };
       }
+      let targetEl = result.domEl;
+      let isAntSelect = false;
+      if (targetEl.tagName === "INPUT" && targetEl.classList.contains("ant-select-selection-search-input")) {
+        const selector2 = targetEl.closest(".ant-select-selector");
+        if (selector2) {
+          targetEl = selector2;
+          isAntSelect = true;
+        } else {
+          const selectContainer = targetEl.closest(".ant-select");
+          if (selectContainer) {
+            targetEl = selectContainer;
+            isAntSelect = true;
+          }
+        }
+      }
       try {
-        result.domEl.click();
+        targetEl.click();
       } catch (e2) {
-        result.domEl.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+        targetEl.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+      }
+      if (isAntSelect) {
+        targetEl.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true }));
       }
       return { action: "click", el_id, success: true };
     }
@@ -83592,7 +83901,7 @@
     type: "function",
     function: {
       name: "page_skill",
-      description: "Scan the current page. Without block_id: returns the page overview \u2014 all interactive DOM elements (dom_snapshot), the page module outline (page_outline), and summaries of every readable content block: data tables (data_tables), charts (charts) and text blocks (text_blocks), each with id, title, size and a short preview. With block_id: returns the full content of that one block (table rows / chart data / full text). Call the overview first, then fetch details only for blocks you actually need.",
+      description: "Scan the current page. Three modes: (1) Without block_id or query: returns the page structure overview \u2014 page_outline, regions, and content block summaries. (2) With query: searches all page elements by keyword (matches text, label, placeholder, value, selector) and returns matching elements directly \u2014 use this to find specific elements without drilling through regions. (3) With block_id: returns details for that block \u2014 table_001 for full table rows, chart_001 for chart data, text_001 for full text, region_001 for interactive elements in that region, el_xxxx for full element details.",
       parameters: {
         type: "object",
         properties: {
@@ -83600,9 +83909,13 @@
             type: "string",
             description: "Brief description of why this scan is needed"
           },
+          query: {
+            type: "string",
+            description: 'Optional. Search keyword to find matching elements directly (e.g. "\u4FEE\u6539", "4\u6708\u91D1\u989D", "xxx", "\u586B\u62A5\u4EBA"). Matches against element text, label, placeholder, value, and selector. Returns matching elements with their el_id, type, text, and context.'
+          },
           block_id: {
             type: "string",
-            description: "Optional. A block id from a previous overview scan (e.g. table_001, chart_001, text_001). When provided, returns the full content of that block instead of the page overview."
+            description: "Optional. A block id from a previous scan (table_001, chart_001, text_001, region_001, el_xxxx). Returns details for that block instead of the overview."
           }
         },
         required: ["step_description"]
@@ -83628,7 +83941,7 @@
           },
           el_id: {
             type: "string",
-            description: 'Element ID from page scan (e.g. el_001). Use "window" to scroll the entire page.'
+            description: 'Element ID from page scan (e.g. el_a3f2). Use "window" to scroll the entire page.'
           },
           value: {
             type: "string",
@@ -83696,17 +84009,23 @@
     }
   };
   var PAGE_SKILL_PROMPT = `- \u6BCF\u6B21\u64CD\u4F5C\u524D\u5FC5\u987B\u5148\u8C03\u7528 page_skill \u786E\u8BA4\u5F53\u524D\u9875\u9762\u72B6\u6001
-- \u4E0D\u786E\u5B9A\u76EE\u6807\u5143\u7D20\u65F6\uFF0C\u4F18\u5148\u7528 page_skill \u626B\u63CF\uFF0C\u4E0D\u8981\u76F2\u76EE\u64CD\u4F5C
-- \u6E10\u8FDB\u5F0F\u53D1\u73B0\uFF1A\u5148\u505A\u4E00\u6B21\u4E0D\u5E26 block_id \u7684\u603B\u89C8\u626B\u63CF\u2014\u2014page_outline \u662F\u9875\u9762\u6240\u6709\u6A21\u5757\u7684\u6807\u9898\u7ED3\u6784\uFF1Bdata_tables / charts / text_blocks \u662F\u9875\u9762\u4E0A\u6240\u6709\u53EF\u8BFB\u5185\u5BB9\u5757\u7684\u6458\u8981\uFF08\u6807\u9898\u3001\u89C4\u6A21\u3001\u9884\u89C8\uFF09\u3002\u9700\u8981\u67D0\u4E2A\u5757\u7684\u5B8C\u6574\u5185\u5BB9\u65F6\uFF0C\u518D\u5E26 block_id \u8C03\u7528 page_skill\uFF08\u5982 table_001 \u53D6\u8868\u683C\u5168\u90E8\u884C\u3001chart_001 \u53D6\u56FE\u8868\u6570\u636E\u3001text_001 \u53D6\u6587\u672C\u5168\u6587\uFF09\u3002\u4E0D\u8981\u4E00\u6B21\u6027\u62C9\u53D6\u6240\u6709\u5757\u7684\u5168\u6587
+- \u4E09\u79CD\u4F7F\u7528\u65B9\u5F0F\uFF1A
+  1. \u641C\u7D22\uFF08query="\u5173\u952E\u8BCD"\uFF09\uFF1A\u76F4\u8FBE\u76F8\u5173\u5143\u7D20\u2014\u2014\u77E5\u9053\u76EE\u6807\u662F\u4EC0\u4E48\u65F6\u4F18\u5148\u7528\u641C\u7D22\uFF08\u5982 query="\u4FEE\u6539"\u3001query="xxx"\u3001query="\u586B\u62A5\u4EBA"\uFF09\uFF0C\u652F\u6301\u591A\u5173\u952E\u8BCD\u7A7A\u683C\u5206\u9694\uFF08AND \u8BED\u4E49\uFF09
+  2. \u603B\u89C8\uFF08\u4E0D\u5E26\u53C2\u6570\uFF09\uFF1A\u770B page_outline\uFF08\u9875\u9762\u6A21\u5757\u7ED3\u6784\uFF09\u3001regions\uFF08\u9875\u9762\u533A\u57DF\u5212\u5206\uFF09\u3001data_tables/charts/text_blocks\uFF08\u5185\u5BB9\u5757\u6458\u8981\uFF09\u2014\u2014\u4E0D\u4E86\u89E3\u9875\u9762\u7ED3\u6784\u65F6\u7528
+  3. \u6DF1\u5165\uFF08block_id=region_001/el_xxxx/table_001/chart_001/text_001\uFF09\uFF1A\u67E5\u770B\u533A\u57DF\u5143\u7D20\u5217\u8868\u3001\u5143\u7D20\u5B8C\u6574\u5185\u5BB9\u3001\u8868\u683C\u5168\u90E8\u884C\u3001\u56FE\u8868\u6570\u636E\u3001\u6587\u672C\u5168\u6587
+- \u5DE5\u4F5C\u6D41\u5EFA\u8BAE\uFF1A\u5148\u641C\u7D22\u627E\u76EE\u6807\u5143\u7D20 \u2192 \u627E\u4E0D\u5230\u518D\u603B\u89C8\u770B\u7ED3\u6784 \u2192 \u6DF1\u5165\u533A\u57DF/\u5143\u7D20\u786E\u8BA4\u7EC6\u8282 \u2192 \u6267\u884C\u64CD\u4F5C
 - \u9700\u8981\u8BFB\u53D6\u9875\u9762\u6570\u636E\u65F6\u4F18\u5148\u7528\u6458\u8981\u548C block_id\uFF0C\u4E0D\u8981\u901A\u8FC7\u70B9\u51FB\u7F16\u8F91\u6309\u94AE\u6216\u6EDA\u52A8\u53BB\u5BFB\u627E\u5185\u5BB9
 - \u8868\u683C\u5185\u7684\u5143\u7D20\u4F1A\u643A\u5E26 table \u5B57\u6BB5\uFF08row/col/header\uFF09\uFF0C\u7528 header \u5339\u914D\u5217\u540D\uFF0C\u7528 row \u5B9A\u4F4D\u6570\u636E\u884C
-- \u8868\u5934\u5143\u7D20\uFF08role: "columnheader"\uFF09\u4E0D\u53EF\u7F16\u8F91\uFF0C\u8981\u64CD\u4F5C\u6570\u636E\u8BF7\u4F7F\u7528\u5BF9\u5E94\u884C\u7684\u5143\u7D20`;
+- \u8868\u5934\u5143\u7D20\uFF08role: "columnheader"\uFF09\u4E0D\u53EF\u7F16\u8F91\uFF0C\u8981\u64CD\u4F5C\u6570\u636E\u8BF7\u4F7F\u7528\u5BF9\u5E94\u884C\u7684\u5143\u7D20
+- el_id \u662F\u7A33\u5B9A\u6807\u8BC6\uFF08\u57FA\u4E8E\u5143\u7D20 selector \u7684 hash\uFF09\uFF0C\u540C\u4E00\u5143\u7D20\u591A\u6B21\u626B\u63CF id \u4E0D\u53D8`;
   var DOM_SKILL_PROMPT = `- \u64CD\u4F5C\u5143\u7D20\u65F6\u53EA\u4F7F\u7528 el_id \u5F15\u7528\uFF0C\u4E0D\u8981\u81EA\u884C\u6784\u9020 CSS selector
 - \u6267\u884C DOM \u64CD\u4F5C\u524D\u786E\u4FDD\u76EE\u6807\u5143\u7D20\u5728\u6700\u65B0\u7684\u9875\u9762\u5FEB\u7167\u4E2D\u5B58\u5728
 - \u6EDA\u52A8\u9875\u9762\u67E5\u770B\u66F4\u591A\u5185\u5BB9\u65F6\uFF0C\u4F7F\u7528 dom_skill \u7684 scroll action\uFF0Cel_id \u4F20 "window"\uFF0Cdirection \u4F20 "down" \u6216 "up"
 - \u64CD\u4F5C\u8868\u683C\u65F6\uFF0C\u6839\u636E table.header \u5339\u914D\u5217\u540D\uFF0C\u6839\u636E table.row \u5B9A\u4F4D\u884C\uFF0C\u4E0D\u8981\u70B9\u51FB\u8868\u5934\uFF08role: "columnheader"\uFF09
 - \u5143\u7D20\u7684 events \u5B57\u6BB5\u5217\u51FA\u4E86\u5B9E\u9645\u7ED1\u5B9A\u7684\u4E8B\u4EF6\uFF08\u5982 click\u3001change\uFF09\uFF0C\u7528\u5B83\u5224\u65AD\u5143\u7D20\u7684\u771F\u5B9E\u4EA4\u4E92\u65B9\u5F0F
-- \u9009\u62E9\u8868\u683C\u884C\u65F6\uFF0C\u5BF9\u6BD4 table-row \u548C\u884C\u5185 radio/checkbox \u7684 events\uFF0C\u54EA\u4E2A\u6709 click \u4E8B\u4EF6\u5C31\u70B9\u54EA\u4E2A`;
+- \u9009\u62E9\u8868\u683C\u884C\u65F6\uFF0C\u5BF9\u6BD4 table-row \u548C\u884C\u5185 radio/checkbox \u7684 events\uFF0C\u54EA\u4E2A\u6709 click \u4E8B\u4EF6\u5C31\u70B9\u54EA\u4E2A
+- \u70B9\u51FB\u540E\u5982\u679C\u6CA1\u53CD\u5E94\uFF0C\u5148\u8C03 page_skill \u91CD\u65B0\u626B\u63CF\u786E\u8BA4\u9875\u9762\u72B6\u6001\u53D8\u5316\uFF0C\u4E0D\u8981\u76F2\u76EE\u91CD\u8BD5
+- \u4E0D\u786E\u5B9A\u5143\u7D20\u600E\u4E48\u4EA4\u4E92\u65F6\uFF0C\u5148\u7528 page_skill(block_id=el_xxxx) \u67E5\u770B\u5143\u7D20\u7684\u5B8C\u6574\u5185\u5BB9\uFF08outerHTML\u3001\u4E8B\u4EF6\u3001\u8BA1\u7B97\u6837\u5F0F\uFF09\uFF0C\u518D\u51B3\u5B9A\u600E\u4E48\u64CD\u4F5C`;
   var NAVIGATION_SKILL_PROMPT = `- \u9875\u9762\u8DF3\u8F6C\u540E\u5FC5\u987B\u91CD\u65B0\u8C03\u7528 page_skill \u626B\u63CF\u9875\u9762\uFF0C\u4E0D\u80FD\u590D\u7528\u65E7\u7684\u5143\u7D20\u4FE1\u606F`;
   function buildWebSkills(deps) {
     const { pageScanner, domExecutor, domHighlight, virtualMouse, runManager } = deps;
@@ -83719,6 +84038,10 @@
         executionMode: "sdk",
         cache: { enabled: true, ttl: 3e4, mode: "snapshot", invalidateOn: ["urlchange", "dom:mutation"] },
         execute: async (params) => {
+          const query = typeof params.query === "string" ? params.query.trim() : "";
+          if (query) {
+            return pageScanner.searchElements(query);
+          }
           const blockId = typeof params.block_id === "string" ? params.block_id.trim() : "";
           if (blockId) {
             const detail = pageScanner.getBlockDetail(blockId);
@@ -83729,8 +84052,8 @@
             }
             return detail;
           }
-          const { elements, truncated, page_outline, data_tables, charts, text_blocks } = pageScanner.scan();
-          return { dom_snapshot: elements, truncated, page_outline, data_tables, charts, text_blocks };
+          const { regions, page_outline, data_tables, charts, text_blocks } = pageScanner.scan();
+          return { regions, page_outline, data_tables, charts, text_blocks };
         }
       },
       // 2. DOMSkill

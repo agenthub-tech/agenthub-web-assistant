@@ -1,7 +1,7 @@
 // PageScanner — DOM 快照提取
 // 需求：4.1、4.2、4.3、4.4、4.5、4.6、4.7、4.8、5.1、5.2
 
-import type { DOMElement, ScanResult, PageOutlineItem, DataTableSummary, ChartSummary, TextBlockSummary } from '../types/dom';
+import type { DOMElement, ScanResult, PageOutlineItem, DataTableSummary, ChartSummary, TextBlockSummary, RegionSummary } from '../types/dom';
 
 const SELECTORS = [
   'button',
@@ -333,6 +333,168 @@ function joinRow(cells: string[]): string {
   return cells.join(' | ');
 }
 
+// ── 页面区域划分 ─────────────────────────────────────────────────────────────
+
+/** 区域容器选择器：按语义优先级排列 */
+const REGION_CONTAINERS: Array<{ selector: string; type: string }> = [
+  { selector: 'dialog, [role="dialog"], .ant-modal, .el-dialog', type: 'dialog' },
+  { selector: '.ant-tabs, .el-tabs, [role="tablist"]', type: 'tabs' },
+  { selector: 'form, .ant-form, .el-form', type: 'form' },
+  { selector: 'table, .ant-table, .el-table', type: 'table' },
+  { selector: 'nav, [role="navigation"], .ant-menu, .el-menu', type: 'nav' },
+  { selector: 'main, article, [role="main"]', type: 'content' },
+  { selector: 'section, .ant-card, .el-card, [class*="panel"]', type: 'content' },
+];
+
+/** 区域容器元素引用（extractRegions 和 getRegionElements 共享） */
+const _regionContainerMap = new Map<string, Element>();
+
+/**
+ * 将页面划分为若干语义区域，返回每个区域的摘要。
+ * 模型按需深入查看某个区域的交互元素（渐进式披露）。
+ */
+function extractRegions(elements: DOMElement[]): RegionSummary[] {
+  const regions: RegionSummary[] = [];
+  const assigned = new Set<string>();
+  _regionContainerMap.clear();
+
+  for (const { selector, type } of REGION_CONTAINERS) {
+    const containers = document.querySelectorAll(selector);
+    for (const container of Array.from(containers)) {
+      if (isSDKElement(container)) continue;
+
+      // 跳过已被更大区域包含的容器（用容器元素引用检查，不是 id 替换）
+      let dominated = false;
+      for (const [, existingContainer] of _regionContainerMap) {
+        if (existingContainer !== container && existingContainer.contains(container)) {
+          dominated = true;
+          break;
+        }
+      }
+      if (dominated) continue;
+
+      // 找到该区域内的交互元素
+      const regionElements = elements.filter((el) => {
+        if (assigned.has(el.selector)) return false;
+        const domEl = document.querySelector(el.selector);
+        return domEl && container.contains(domEl);
+      });
+
+      if (regionElements.length === 0) continue;
+
+      regionElements.forEach((el) => assigned.add(el.selector));
+
+      // 区域可见性
+      let visible = true;
+      try {
+        const style = window.getComputedStyle(container);
+        visible = style.display !== 'none' && style.visibility !== 'hidden';
+      } catch { /* ignore */ }
+
+      // 区域名称
+      const heading = container.querySelector('h1, h2, h3, h4, h5, h6, .ant-card-head-title, .el-card__header');
+      const name = heading?.textContent?.trim().slice(0, 40)
+        || regionElements[0]?.text?.slice(0, 40)
+        || type;
+
+      // 操作类型（修改/删除/编辑等）
+      const actionSet = new Set<string>();
+      for (const el of regionElements) {
+        if (el.text && isActionText(el.text)) actionSet.add(el.text);
+      }
+
+      // 预览
+      const preview = regionElements
+        .slice(0, 6)
+        .map((el) => el.text || el.label || el.type)
+        .filter(Boolean)
+        .join(' | ')
+        .slice(0, 120);
+
+      const regionId = `region_${String(regions.length + 1).padStart(3, '0')}`;
+      _regionContainerMap.set(regionId, container);
+
+      regions.push({
+        id: regionId,
+        name,
+        type,
+        element_count: regionElements.length,
+        visible,
+        has_actions: Array.from(actionSet),
+        preview,
+        container_selector: selector,
+      });
+    }
+  }
+
+  // 未分配元素归入 "other"
+  const unassigned = elements.filter((el) => !assigned.has(el.selector));
+  if (unassigned.length > 0) {
+    const actionSet = new Set<string>();
+    for (const el of unassigned) {
+      if (el.text && isActionText(el.text)) actionSet.add(el.text);
+    }
+    const preview = unassigned
+      .slice(0, 6)
+      .map((el) => el.text || el.label || el.type)
+      .filter(Boolean)
+      .join(' | ')
+      .slice(0, 120);
+    regions.push({
+      id: `region_${String(regions.length + 1).padStart(3, '0')}`,
+      name: '其他',
+      type: 'other',
+      element_count: unassigned.length,
+      visible: true,
+      has_actions: Array.from(actionSet),
+      preview,
+      container_selector: '',
+    });
+  }
+
+  return regions;
+}
+
+/**
+ * 基于字符串生成稳定的短 hash（4 位十六进制），用于 el_id。
+ * 同一 selector 多次扫描生成相同的 id，保证元素标识稳定。
+ */
+function stableHash(str: string): string {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    const char = str.charCodeAt(i);
+    hash = ((hash << 5) - hash + char) | 0; // 32-bit int hash
+  }
+  // 转为正数的 4 位十六进制
+  return (hash >>> 0).toString(16).slice(-4).padStart(4, '0');
+}
+
+/**
+ * Check if a short text looks like a row-level action (修改/删除/编辑 etc.).
+ * Used to identify distinct actionable elements inside table rows.
+ */
+function isActionText(text: string): boolean {
+  const actionWords = [
+    '修改', '删除', '编辑', '查看', '详情', '审批', '驳回', '通过',
+    '确认', '取消', '启用', '停用', '下载', '导出', '打印', '复制',
+  ];
+  return actionWords.some((w) => text === w);
+}
+
+/**
+ * Check if an element inside a table row is a distinct action target
+ * (e.g. "修改"/"删除"/"编辑" links or buttons), as opposed to a generic
+ * clickable area that just triggers the row's own click handler.
+ */
+function isRowAction(el: Element): boolean {
+  const tag = el.tagName.toLowerCase();
+  if (tag === 'a' || tag === 'button') return true;
+  const text = el.textContent?.trim() ?? '';
+  // Short action-like texts that are distinct from the row itself
+  const actionWords = ['修改', '删除', '编辑', '查看', '详情', '审批', '驳回', '通过', '确认', '取消'];
+  return actionWords.some((w) => text === w || text.startsWith(w));
+}
+
 /**
  * Check if an element has click-like interactivity via inline styles or class hints.
  * Catches Ant Design / custom components that use div + cursor:pointer.
@@ -605,13 +767,19 @@ export class PageScanner {
     });
 
     // Also find cursor:pointer elements not matched by selectors
-    const allElements = document.querySelectorAll('div, span, li, img, svg, label');
+    const allElements = document.querySelectorAll('div, span, li, img, svg, label, a');
     allElements.forEach((el) => {
       if (!isSDKElement(el) && !raw.includes(el) && isClickable(el)) {
-        // Skip if a parent is already in the list (avoid duplicating nested clickables)
+        // Skip if a parent is already in the list (avoid duplicating nested clickables).
+        // Exception: elements inside table rows that have their own action semantics
+        // (e.g. "修改"/"删除" links) should be kept even when the tr is also listed.
         let dominated = false;
         for (const existing of raw) {
           if (existing.contains(el) && existing !== el) {
+            // Don't skip if this element is a distinct action inside a table row
+            if (existing.tagName === 'TR' && isRowAction(el)) {
+              continue;
+            }
             dominated = true;
             break;
           }
@@ -628,17 +796,32 @@ export class PageScanner {
       if (!isSDKElement(tr) && !raw.includes(tr) && isVisible(tr)) {
         raw.push(tr);
       }
+
+      // Also scan action elements inside table rows (修改/删除/编辑 buttons or links)
+      // that may not have their own click events but are distinct actionable targets.
+      // Strategy: find leaf-level elements whose text is exactly an action word.
+      const allDescendants = tr.querySelectorAll('a, button, [role="button"], span, div, td');
+      allDescendants.forEach((actionEl) => {
+        if (!isSDKElement(actionEl) && !raw.includes(actionEl) && isVisible(actionEl)) {
+          const text = actionEl.textContent?.trim() ?? '';
+          // Only leaf-level elements with exact action text (修改/删除/编辑 etc.)
+          // Skip containers that combine multiple actions (e.g. "修改删除" wrapper)
+          if (isActionText(text) && actionEl.children.length === 0) {
+            raw.push(actionEl);
+          }
+        }
+      });
     });
 
     // 去重（同一元素可能匹配多个选择器）
     const unique = Array.from(new Set(raw));
 
-    // 构建 DOMElement 列表（1-indexed el_id）
-    const all: DOMElement[] = unique.map((el, i) => {
-      const id = `el_${String(i + 1).padStart(3, '0')}`;
+    // 构建 DOMElement 列表（稳定 el_id：基于 selector 的短 hash，同一元素多次扫描 id 不变）
+    const all: DOMElement[] = unique.map((el) => {
+      const selector = buildSelector(el);
+      const id = `el_${stableHash(selector)}`;
       const tag = el.tagName.toLowerCase();
       let type = getElementType(el);
-      const selector = buildSelector(el);
       const visible = isVisible(el);
 
       // Special handling for table rows: extract cell summary
@@ -724,6 +907,7 @@ export class PageScanner {
       return {
         elements: all,
         truncated: false,
+        regions: extractRegions(all),
         ...this.buildDiscoverySummaries(),
       };
     }
@@ -742,6 +926,7 @@ export class PageScanner {
     return {
       elements,
       truncated: true,
+      regions: extractRegions(elements),
       ...this.buildDiscoverySummaries(),
     };
   }
@@ -790,16 +975,188 @@ export class PageScanner {
   }
 
   /**
+   * 搜索页面元素：按关键词在所有元素中做全文匹配。
+   * 匹配字段：text / label / placeholder / value / selector / table.header。
+   * 支持多关键词（空格分隔，AND 语义）。
+   * 返回匹配的元素列表（含 el_id/type/text/label/table 上下文），按相关度排序。
+   */
+  searchElements(query: string): Record<string, unknown> {
+    const { elements } = this.scan();
+    const keywords = query.toLowerCase().split(/\s+/).filter(Boolean);
+    if (keywords.length === 0) return { query, match_count: 0, elements: [] };
+
+    const scored: Array<{ el: DOMElement; score: number }> = [];
+
+    for (const el of elements) {
+      // 构建可搜索文本
+      const searchable = [
+        el.text,
+        el.label,
+        el.placeholder,
+        el.value,
+        el.selector,
+        el.table?.header,
+        el.type,
+        el.role,
+      ]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase();
+
+      // 计算匹配分数：每个关键词命中加分，精确匹配文本加分更多
+      let score = 0;
+      let allMatched = true;
+      for (const kw of keywords) {
+        if (searchable.includes(kw)) {
+          score += 1;
+          // 精确匹配 text 或 label 加分
+          if (el.text?.toLowerCase() === kw || el.label?.toLowerCase() === kw) {
+            score += 3;
+          }
+          // text/label 包含关键词加分
+          else if (el.text?.toLowerCase().includes(kw) || el.label?.toLowerCase().includes(kw)) {
+            score += 2;
+          }
+        } else {
+          allMatched = false;
+          break;
+        }
+      }
+
+      if (allMatched && score > 0) {
+        scored.push({ el, score });
+      }
+    }
+
+    // 按相关度排序
+    scored.sort((a, b) => b.score - a.score);
+    const matched = scored.slice(0, 30).map(({ el }) => el);
+
+    return {
+      query,
+      match_count: matched.length,
+      elements: matched,
+    };
+  }
+
+  /**
    * Full content of a single block discovered in an overview scan, addressed
-   * by block_id: "table_001" | "chart_001" | "text_001". Returns null when
-   * the id doesn't match the current DOM (e.g. the page changed) — the
-   * caller should tell the agent to re-scan.
+   * by block_id: "table_001" | "chart_001" | "text_001" | "region_001" | "el_001".
+   * Returns null when the id doesn't match the current DOM.
    */
   getBlockDetail(blockId: string): Record<string, unknown> | null {
     if (blockId.startsWith('table_')) return this.getTableDetail(blockId);
     if (blockId.startsWith('chart_')) return this.getChartDetail(blockId);
     if (blockId.startsWith('text_')) return this.getTextDetail(blockId);
+    if (blockId.startsWith('region_')) return this.getRegionElements(blockId);
+    if (blockId.startsWith('el_')) return this.getElementDetail(blockId);
     return null;
+  }
+
+  /**
+   * 查看某个区域内的交互元素列表（渐进式披露第二层）。
+   * region_id 来自总览扫描的 regions 字段。
+   * 用 extractRegions 时存的容器元素引用匹配，不用索引猜选择器。
+   */
+  private getRegionElements(regionId: string): Record<string, unknown> | null {
+    const { elements } = this.scan();
+    const regions = extractRegions(elements); // 重新填充 _regionContainerMap
+    const region = regions.find((r) => r.id === regionId);
+    if (!region) return null;
+
+    // "other" 区域：返回所有未被其他区域分配的元素
+    if (region.type === 'other') {
+      const otherElements = elements.filter((el) => {
+        for (const [, container] of _regionContainerMap) {
+          const domEl = document.querySelector(el.selector);
+          if (domEl && container.contains(domEl)) return false;
+        }
+        return true;
+      });
+      return {
+        region_id: regionId,
+        name: region.name,
+        type: region.type,
+        element_count: otherElements.length,
+        elements: otherElements.slice(0, 50),
+      };
+    }
+
+    // 用容器元素引用匹配
+    const container = _regionContainerMap.get(regionId);
+    if (!container) return null;
+
+    const regionElements = elements.filter((el) => {
+      const domEl = document.querySelector(el.selector);
+      return domEl && container.contains(domEl);
+    });
+
+    return {
+      region_id: regionId,
+      name: region.name,
+      type: region.type,
+      element_count: regionElements.length,
+      elements: regionElements.slice(0, 50),
+    };
+  }
+
+  /**
+   * 查看单个元素的完整内容（渐进式披露第三层）。
+   * el_id 来自 dom_snapshot 或区域元素列表。
+   */
+  private getElementDetail(elId: string): Record<string, unknown> | null {
+    const { elements } = this.scan();
+    const element = elements.find((e) => e.id === elId);
+    if (!element) return null;
+
+    const domEl = document.querySelector(element.selector);
+    if (!domEl) return { el_id: elId, error: '元素在当前 DOM 中不存在（页面可能已变化）' };
+
+    // 完整 outerHTML（截断到 2000 字符）
+    const outerHTML = domEl.outerHTML.slice(0, 2000);
+
+    // 计算样式关键属性
+    const style = window.getComputedStyle(domEl);
+    const computedStyle = {
+      display: style.display,
+      visibility: style.visibility,
+      cursor: style.cursor,
+      pointerEvents: style.pointerEvents,
+      opacity: style.opacity,
+      zIndex: style.zIndex,
+    };
+
+    // 父链（最多 5 层）
+    const ancestors: string[] = [];
+    let node: Element | null = domEl.parentElement;
+    while (node && ancestors.length < 5) {
+      const tag = node.tagName.toLowerCase();
+      const cls = node.className?.toString().split(' ').slice(0, 3).join('.') ?? '';
+      ancestors.push(cls ? `${tag}.${cls}` : tag);
+      node = node.parentElement;
+    }
+
+    // 子元素摘要
+    const children = Array.from(domEl.children).slice(0, 10).map((child) => ({
+      tag: child.tagName.toLowerCase(),
+      text: child.textContent?.trim().slice(0, 50) ?? '',
+      class: child.className?.toString().slice(0, 60) ?? '',
+    }));
+
+    return {
+      el_id: elId,
+      type: element.type,
+      text: element.text,
+      selector: element.selector,
+      visible: element.visible,
+      events: element.events,
+      label: element.label,
+      table: element.table,
+      outerHTML,
+      computedStyle,
+      ancestors,
+      children,
+    };
   }
 
   private getTableDetail(tableId: string): Record<string, unknown> | null {

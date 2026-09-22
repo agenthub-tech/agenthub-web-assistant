@@ -15,7 +15,7 @@ const PAGE_SKILL_SCHEMA = {
   function: {
     name: 'page_skill',
     description:
-      'Scan the current page. Without block_id: returns the page overview — all interactive DOM elements (dom_snapshot), the page module outline (page_outline), and summaries of every readable content block: data tables (data_tables), charts (charts) and text blocks (text_blocks), each with id, title, size and a short preview. With block_id: returns the full content of that one block (table rows / chart data / full text). Call the overview first, then fetch details only for blocks you actually need.',
+      'Scan the current page. Three modes: (1) Without block_id or query: returns the page structure overview — page_outline, regions, and content block summaries. (2) With query: searches all page elements by keyword (matches text, label, placeholder, value, selector) and returns matching elements directly — use this to find specific elements without drilling through regions. (3) With block_id: returns details for that block — table_001 for full table rows, chart_001 for chart data, text_001 for full text, region_001 for interactive elements in that region, el_xxxx for full element details.',
     parameters: {
       type: 'object',
       properties: {
@@ -23,10 +23,15 @@ const PAGE_SKILL_SCHEMA = {
           type: 'string',
           description: 'Brief description of why this scan is needed',
         },
+        query: {
+          type: 'string',
+          description:
+            'Optional. Search keyword to find matching elements directly (e.g. "修改", "4月金额", "xxx", "填报人"). Matches against element text, label, placeholder, value, and selector. Returns matching elements with their el_id, type, text, and context.',
+        },
         block_id: {
           type: 'string',
           description:
-            'Optional. A block id from a previous overview scan (e.g. table_001, chart_001, text_001). When provided, returns the full content of that block instead of the page overview.',
+            'Optional. A block id from a previous scan (table_001, chart_001, text_001, region_001, el_xxxx). Returns details for that block instead of the overview.',
         },
       },
       required: ['step_description'],
@@ -53,7 +58,7 @@ const DOM_SKILL_SCHEMA = {
         },
         el_id: {
           type: 'string',
-          description: 'Element ID from page scan (e.g. el_001). Use "window" to scroll the entire page.',
+          description: 'Element ID from page scan (e.g. el_a3f2). Use "window" to scroll the entire page.',
         },
         value: {
           type: 'string',
@@ -126,18 +131,24 @@ const CLIPBOARD_SKILL_SCHEMA = {
 // ── Prompt Injections (Req 11.1, 11.2, 11.3, 11.4) ──
 
 const PAGE_SKILL_PROMPT = `- 每次操作前必须先调用 page_skill 确认当前页面状态
-- 不确定目标元素时，优先用 page_skill 扫描，不要盲目操作
-- 渐进式发现：先做一次不带 block_id 的总览扫描——page_outline 是页面所有模块的标题结构；data_tables / charts / text_blocks 是页面上所有可读内容块的摘要（标题、规模、预览）。需要某个块的完整内容时，再带 block_id 调用 page_skill（如 table_001 取表格全部行、chart_001 取图表数据、text_001 取文本全文）。不要一次性拉取所有块的全文
+- 三种使用方式：
+  1. 搜索（query="关键词"）：直达相关元素——知道目标是什么时优先用搜索（如 query="修改"、query="xxx"、query="填报人"），支持多关键词空格分隔（AND 语义）
+  2. 总览（不带参数）：看 page_outline（页面模块结构）、regions（页面区域划分）、data_tables/charts/text_blocks（内容块摘要）——不了解页面结构时用
+  3. 深入（block_id=region_001/el_xxxx/table_001/chart_001/text_001）：查看区域元素列表、元素完整内容、表格全部行、图表数据、文本全文
+- 工作流建议：先搜索找目标元素 → 找不到再总览看结构 → 深入区域/元素确认细节 → 执行操作
 - 需要读取页面数据时优先用摘要和 block_id，不要通过点击编辑按钮或滚动去寻找内容
 - 表格内的元素会携带 table 字段（row/col/header），用 header 匹配列名，用 row 定位数据行
-- 表头元素（role: "columnheader"）不可编辑，要操作数据请使用对应行的元素`;
+- 表头元素（role: "columnheader"）不可编辑，要操作数据请使用对应行的元素
+- el_id 是稳定标识（基于元素 selector 的 hash），同一元素多次扫描 id 不变`;
 
 const DOM_SKILL_PROMPT = `- 操作元素时只使用 el_id 引用，不要自行构造 CSS selector
 - 执行 DOM 操作前确保目标元素在最新的页面快照中存在
 - 滚动页面查看更多内容时，使用 dom_skill 的 scroll action，el_id 传 "window"，direction 传 "down" 或 "up"
 - 操作表格时，根据 table.header 匹配列名，根据 table.row 定位行，不要点击表头（role: "columnheader"）
 - 元素的 events 字段列出了实际绑定的事件（如 click、change），用它判断元素的真实交互方式
-- 选择表格行时，对比 table-row 和行内 radio/checkbox 的 events，哪个有 click 事件就点哪个`;
+- 选择表格行时，对比 table-row 和行内 radio/checkbox 的 events，哪个有 click 事件就点哪个
+- 点击后如果没反应，先调 page_skill 重新扫描确认页面状态变化，不要盲目重试
+- 不确定元素怎么交互时，先用 page_skill(block_id=el_xxxx) 查看元素的完整内容（outerHTML、事件、计算样式），再决定怎么操作`;
 
 const NAVIGATION_SKILL_PROMPT = `- 页面跳转后必须重新调用 page_skill 扫描页面，不能复用旧的元素信息`;
 
@@ -169,6 +180,12 @@ export function buildWebSkills(deps: SkillExecutorDeps): SkillDefinition[] {
       executionMode: 'sdk',
       cache: { enabled: true, ttl: 30000, mode: 'snapshot', invalidateOn: ['urlchange', 'dom:mutation'] },
       execute: async (params) => {
+        // 搜索模式：query 直达相关元素
+        const query = typeof params.query === 'string' ? params.query.trim() : '';
+        if (query) {
+          return pageScanner.searchElements(query);
+        }
+        // 深入查看模式：block_id
         const blockId = typeof params.block_id === 'string' ? params.block_id.trim() : '';
         if (blockId) {
           const detail = pageScanner.getBlockDetail(blockId);
@@ -179,8 +196,9 @@ export function buildWebSkills(deps: SkillExecutorDeps): SkillDefinition[] {
           }
           return detail;
         }
-        const { elements, truncated, page_outline, data_tables, charts, text_blocks } = pageScanner.scan();
-        return { dom_snapshot: elements, truncated, page_outline, data_tables, charts, text_blocks };
+        // 总览模式：只返回结构
+        const { regions, page_outline, data_tables, charts, text_blocks } = pageScanner.scan();
+        return { regions, page_outline, data_tables, charts, text_blocks };
       },
     },
 
