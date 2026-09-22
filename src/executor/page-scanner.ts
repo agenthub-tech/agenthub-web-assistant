@@ -8,7 +8,9 @@ const SELECTORS = [
   'input',
   'textarea',
   'select',
-  'a[href]',
+  // All <a> tags, not just a[href] — component libraries (Ant Design Button
+  // type="link", Typography.Link) render action links as <a> without href.
+  'a',
   '[role="button"]',
   '[role="link"]',
   '[role="checkbox"]',
@@ -496,6 +498,14 @@ function isRowAction(el: Element): boolean {
 }
 
 /**
+ * Native interactive tags — these carry their own click semantics and should
+ * always win over layout wrappers (div/span) during de-duplication.
+ */
+function isNativeInteractive(el: Element): boolean {
+  return ['A', 'BUTTON', 'INPUT', 'SELECT', 'TEXTAREA'].includes(el.tagName);
+}
+
+/**
  * Check if an element has click-like interactivity via inline styles or class hints.
  * Catches Ant Design / custom components that use div + cursor:pointer.
  */
@@ -639,19 +649,14 @@ function getTableContext(el: Element): { row: number; col: number; header: strin
   if (rowIndex < 1) return null;
 
   // Find the corresponding header text from <thead>
+  // Use computeHeaderLabels (handles rowspan/colspan multi-row headers correctly)
   let header = '';
-  const thead = table.querySelector('thead');
-  if (thead) {
-    // Get the last header row (in case of multi-row headers)
-    const headerRows = thead.querySelectorAll('tr');
-    const lastHeaderRow = headerRows[headerRows.length - 1];
-    if (lastHeaderRow) {
-      const headerCells = lastHeaderRow.querySelectorAll('th, td');
-      if (colIndex <= headerCells.length) {
-        header = headerCells[colIndex - 1]?.textContent?.trim() ?? '';
-      }
-    }
+  const headerLabels = computeHeaderLabels(table);
+  if (colIndex <= headerLabels.length) {
+    header = headerLabels[colIndex - 1] ?? '';
   }
+  // Strip leading "* " (required-field marker) so the model sees clean column names
+  header = header.replace(/^\*\s*/, '');
 
   return { row: rowIndex, col: colIndex, header };
 }
@@ -780,6 +785,22 @@ export class PageScanner {
             if (existing.tagName === 'TR' && isRowAction(el)) {
               continue;
             }
+            // Native interactive elements (a/button/input/...) are never
+            // dominated by layout containers (div/span/...) — e.g. an <a>
+            // action link inside a clickable div wrapper must stay clickable
+            // on its own, otherwise clicks land between sibling links.
+            if (isNativeInteractive(el) && !isNativeInteractive(existing)) {
+              continue;
+            }
+            dominated = true;
+            break;
+          }
+          // Reverse containment: this element is a layout wrapper around an
+          // already-collected native interactive element (e.g. ant-space div
+          // wrapping "完成"/"删除" links). The child is the real click target —
+          // skip the wrapper so the model doesn't click between the links.
+          if (el.contains(existing) && existing !== el
+              && isNativeInteractive(existing) && !isNativeInteractive(el)) {
             dominated = true;
             break;
           }

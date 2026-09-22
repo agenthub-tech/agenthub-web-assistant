@@ -80948,7 +80948,9 @@
     "input",
     "textarea",
     "select",
-    "a[href]",
+    // All <a> tags, not just a[href] — component libraries (Ant Design Button
+    // type="link", Typography.Link) render action links as <a> without href.
+    "a",
     '[role="button"]',
     '[role="link"]',
     '[role="checkbox"]',
@@ -81319,6 +81321,9 @@
     const actionWords = ["\u4FEE\u6539", "\u5220\u9664", "\u7F16\u8F91", "\u67E5\u770B", "\u8BE6\u60C5", "\u5BA1\u6279", "\u9A73\u56DE", "\u901A\u8FC7", "\u786E\u8BA4", "\u53D6\u6D88"];
     return actionWords.some((w) => text === w || text.startsWith(w));
   }
+  function isNativeInteractive(el) {
+    return ["A", "BUTTON", "INPUT", "SELECT", "TEXTAREA"].includes(el.tagName);
+  }
   function isClickable(el) {
     var _a2, _b2, _c2, _d;
     try {
@@ -81401,7 +81406,7 @@
     return tag;
   }
   function getTableContext(el) {
-    var _a2, _b2, _c2;
+    var _a2;
     let cell = el;
     while (cell && cell.tagName !== "TD" && cell.tagName !== "TH") {
       cell = cell.parentElement;
@@ -81425,17 +81430,11 @@
     if (rowIndex < 1)
       return null;
     let header = "";
-    const thead = table.querySelector("thead");
-    if (thead) {
-      const headerRows = thead.querySelectorAll("tr");
-      const lastHeaderRow = headerRows[headerRows.length - 1];
-      if (lastHeaderRow) {
-        const headerCells = lastHeaderRow.querySelectorAll("th, td");
-        if (colIndex <= headerCells.length) {
-          header = (_c2 = (_b2 = (_a2 = headerCells[colIndex - 1]) == null ? void 0 : _a2.textContent) == null ? void 0 : _b2.trim()) != null ? _c2 : "";
-        }
-      }
+    const headerLabels = computeHeaderLabels(table);
+    if (colIndex <= headerLabels.length) {
+      header = (_a2 = headerLabels[colIndex - 1]) != null ? _a2 : "";
     }
+    header = header.replace(/^\*\s*/, "");
     return { row: rowIndex, col: colIndex, header };
   }
   function getLabel(el) {
@@ -81545,6 +81544,13 @@
               if (existing.tagName === "TR" && isRowAction(el)) {
                 continue;
               }
+              if (isNativeInteractive(el) && !isNativeInteractive(existing)) {
+                continue;
+              }
+              dominated = true;
+              break;
+            }
+            if (el.contains(existing) && existing !== el && isNativeInteractive(existing) && !isNativeInteractive(el)) {
               dominated = true;
               break;
             }
