@@ -73,6 +73,7 @@ export class FloatButton {
       width: 56px;
       height: 56px;
       border-radius: 50%;
+      overflow: hidden;
       border: none;
       cursor: pointer;
       z-index: 10000;
@@ -103,9 +104,9 @@ export class FloatButton {
     if (config.icon_url) {
       const image = document.createElement('img');
       image.src = config.icon_url;
-      image.width = image.height = 28;
+      image.width = image.height = 56;
       image.alt = '';
-      image.style.cssText = 'border-radius:4px;object-fit:contain;';
+      image.style.cssText = 'display:block;width:100%;height:100%;border-radius:50%;object-fit:cover;';
       image.setAttribute('data-aa-sdk', 'true');
       image.onerror = () => {
         if (this.iconEl.contains(image)) this.iconEl.innerHTML = AA_ICON_SVG;
