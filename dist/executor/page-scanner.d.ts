@@ -1,4 +1,14 @@
 import type { DOMElement, ScanResult } from '../types/dom';
+/**
+ * 基于字符串生成稳定的短 hash（4 位十六进制），用于 el_id。
+ * 同一 selector 多次扫描生成相同的 id，保证元素标识稳定。
+ */
+export declare function stableHash(str: string): string;
+/**
+ * 生成元素的唯一 CSS selector。
+ * 优先使用 id 属性，否则构造 nth-child 路径。
+ */
+export declare function buildSelector(el: Element): string;
 export declare class PageScanner {
     scan(): ScanResult;
     /**

@@ -101,7 +101,16 @@ export class FloatButton {
 
     // Apply icon
     if (config.icon_url) {
-      this.iconEl.innerHTML = `<img src="${config.icon_url}" width="28" height="28" alt="" style="border-radius:50%;object-fit:cover;" data-aa-sdk="true" />`;
+      const image = document.createElement('img');
+      image.src = config.icon_url;
+      image.width = image.height = 28;
+      image.alt = '';
+      image.style.cssText = 'border-radius:4px;object-fit:contain;';
+      image.setAttribute('data-aa-sdk', 'true');
+      image.onerror = () => {
+        if (this.iconEl.contains(image)) this.iconEl.innerHTML = AA_ICON_SVG;
+      };
+      this.iconEl.replaceChildren(image);
     } else {
       this.iconEl.innerHTML = AA_ICON_SVG;
     }

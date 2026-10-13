@@ -3,6 +3,7 @@
 
 import type { DOMElement } from '../types/dom';
 import type { PageScanner } from './page-scanner';
+import { buildSelector, stableHash } from './page-scanner';
 
 export interface ExecuteResult {
   action: 'click' | 'input' | 'scroll' | 'clear';
@@ -22,20 +23,45 @@ export class DOMExecutor {
     const { elements } = this.scanner.scan();
     const element = elements.find((e) => e.id === el_id);
 
-    if (!element) {
-      return { error: `Element '${el_id}' not found in snapshot` };
+    if (element) {
+      if (!element.visible) {
+        return { error: `Element '${el_id}' is not visible` };
+      }
+      const domEl = document.querySelector(element.selector);
+      if (!domEl) {
+        return { error: `Element '${el_id}' not found in snapshot` };
+      }
+      return { element, domEl };
     }
 
-    if (!element.visible) {
-      return { error: `Element '${el_id}' is not visible` };
+    // 快照里没有——可能是 getElementDetail 的 children 里返回的"快照外"元素
+    // （如未被扫描器收集的 <a>完成</a>）。在可交互元素集合里现场计算 el_id 匹配。
+    // el_id 格式是 el_<hash>，hash 来自 buildSelector(el) 的 stableHash。
+    const hash = el_id.replace(/^el_/, '');
+    const candidates = document.querySelectorAll('a, button, input, select, textarea, [role], [onclick]');
+    for (const domEl of Array.from(candidates)) {
+      const sel = buildSelector(domEl);
+      if (stableHash(sel) === hash) {
+        // 构造一个最小 DOMElement（visible 现算）
+        const rect = domEl.getBoundingClientRect();
+        const style = window.getComputedStyle(domEl);
+        const visible = style.display !== 'none' && style.visibility !== 'hidden'
+          && rect.width > 0 && rect.height > 0;
+        if (!visible) {
+          return { error: `Element '${el_id}' is not visible` };
+        }
+        const element: DOMElement = {
+          id: el_id,
+          type: domEl.tagName.toLowerCase(),
+          text: domEl.textContent?.trim().slice(0, 100) ?? null,
+          selector: sel,
+          visible: true,
+        };
+        return { element, domEl };
+      }
     }
 
-    const domEl = document.querySelector(element.selector);
-    if (!domEl) {
-      return { error: `Element '${el_id}' not found in snapshot` };
-    }
-
-    return { element, domEl };
+    return { error: `Element '${el_id}' not found in snapshot` };
   }
 
   click(el_id: string): ExecuteResult {

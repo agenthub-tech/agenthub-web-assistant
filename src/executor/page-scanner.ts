@@ -461,7 +461,7 @@ function extractRegions(elements: DOMElement[]): RegionSummary[] {
  * 基于字符串生成稳定的短 hash（4 位十六进制），用于 el_id。
  * 同一 selector 多次扫描生成相同的 id，保证元素标识稳定。
  */
-function stableHash(str: string): string {
+export function stableHash(str: string): string {
   let hash = 0;
   for (let i = 0; i < str.length; i++) {
     const char = str.charCodeAt(i);
@@ -559,7 +559,7 @@ function isVisible(el: Element): boolean {
  * 生成元素的唯一 CSS selector。
  * 优先使用 id 属性，否则构造 nth-child 路径。
  */
-function buildSelector(el: Element): string {
+export function buildSelector(el: Element): string {
   if (el.id) {
     return `#${CSS.escape(el.id)}`;
   }
@@ -771,6 +771,15 @@ export class PageScanner {
       }
     });
 
+    // DEBUG: 无条件输出 <a> 收集情况（生产环境排查用，后续移除）
+    try {
+      const links = raw.filter((e) => e.tagName === 'A');
+      const noHref = links.filter((e) => !e.hasAttribute('href'));
+      if (noHref.length > 0) {
+        console.warn('[AA scan] href-less <a> collected:', noHref.map((e) => e.textContent?.trim()));
+      }
+    } catch (_) { /* noop */ }
+
     // Also find cursor:pointer elements not matched by selectors
     const allElements = document.querySelectorAll('div, span, li, img, svg, label, a');
     allElements.forEach((el) => {
@@ -922,6 +931,12 @@ export class PageScanner {
 
       return element;
     });
+
+    // DEBUG: 输出最终 <a> 元素（排查 href-less 链接是否活到最后）
+    try {
+      const finalLinks = all.filter((e) => e.type === 'a');
+      console.warn('[AA scan] final <a> elements:', finalLinks.map((e) => ({ id: e.id, text: e.text, visible: e.visible })));
+    } catch (_) { /* noop */ }
 
     // 截断策略：超过 200 个时优先保留 visible:true，再补充 visible:false 至 200
     if (all.length <= MAX_ELEMENTS) {
@@ -1157,12 +1172,34 @@ export class PageScanner {
       node = node.parentElement;
     }
 
-    // 子元素摘要
-    const children = Array.from(domEl.children).slice(0, 10).map((child) => ({
-      tag: child.tagName.toLowerCase(),
-      text: child.textContent?.trim().slice(0, 50) ?? '',
-      class: child.className?.toString().slice(0, 60) ?? '',
-    }));
+    // 子元素摘要——为每个可交互后代生成稳定 el_id，让模型能直接点击。
+    // 递归展开到叶子层，因为真正的点击目标（如 <a>完成</a>）可能嵌套在
+    // 布局容器（div.ant-space-item）里，且未被扫描器收集。
+    const children: Array<Record<string, unknown>> = [];
+    const collectInteractive = (root: Element, depth: number) => {
+      if (depth > 3 || children.length >= 20) return;
+      for (const child of Array.from(root.children)) {
+        const tag = child.tagName.toLowerCase();
+        const text = child.textContent?.trim().slice(0, 50) ?? '';
+        const isInteractive = isNativeInteractive(child)
+          || child.getAttribute('role')
+          || (typeof window !== 'undefined' && window.getComputedStyle(child).cursor === 'pointer');
+        if (isInteractive) {
+          const sel = buildSelector(child);
+          children.push({
+            el_id: `el_${stableHash(sel)}`,
+            tag,
+            text,
+            class: child.className?.toString().slice(0, 60) ?? '',
+          });
+        }
+        // 继续展开非交互容器（如 div.ant-space-item）
+        if (!isInteractive || child.children.length > 0) {
+          collectInteractive(child, depth + 1);
+        }
+      }
+    };
+    collectInteractive(domEl, 0);
 
     return {
       el_id: elId,

@@ -81533,6 +81533,17 @@ var PageScanner = class {
         raw.push(el);
       }
     });
+    try {
+      const links = raw.filter((e2) => e2.tagName === "A");
+      const noHref = links.filter((e2) => !e2.hasAttribute("href"));
+      if (noHref.length > 0) {
+        console.warn("[AA scan] href-less <a> collected:", noHref.map((e2) => {
+          var _a2;
+          return (_a2 = e2.textContent) == null ? void 0 : _a2.trim();
+        }));
+      }
+    } catch (_) {
+    }
     const allElements = document.querySelectorAll("div, span, li, img, svg, label, a");
     allElements.forEach((el) => {
       if (!isSDKElement(el) && !raw.includes(el) && isClickable(el)) {
@@ -81647,6 +81658,11 @@ var PageScanner = class {
       }
       return element;
     });
+    try {
+      const finalLinks = all.filter((e2) => e2.type === "a");
+      console.warn("[AA scan] final <a> elements:", finalLinks.map((e2) => ({ id: e2.id, text: e2.text, visible: e2.visible })));
+    } catch (_) {
+    }
     if (all.length <= MAX_ELEMENTS) {
       return __spreadValues({
         elements: all,
@@ -81856,14 +81872,30 @@ var PageScanner = class {
       ancestors.push(cls ? `${tag}.${cls}` : tag);
       node = node.parentElement;
     }
-    const children = Array.from(domEl.children).slice(0, 10).map((child) => {
+    const children = [];
+    const collectInteractive = (root, depth) => {
       var _a3, _b3, _c2, _d;
-      return {
-        tag: child.tagName.toLowerCase(),
-        text: (_b3 = (_a3 = child.textContent) == null ? void 0 : _a3.trim().slice(0, 50)) != null ? _b3 : "",
-        class: (_d = (_c2 = child.className) == null ? void 0 : _c2.toString().slice(0, 60)) != null ? _d : ""
-      };
-    });
+      if (depth > 3 || children.length >= 20)
+        return;
+      for (const child of Array.from(root.children)) {
+        const tag = child.tagName.toLowerCase();
+        const text = (_b3 = (_a3 = child.textContent) == null ? void 0 : _a3.trim().slice(0, 50)) != null ? _b3 : "";
+        const isInteractive = isNativeInteractive(child) || child.getAttribute("role") || typeof window !== "undefined" && window.getComputedStyle(child).cursor === "pointer";
+        if (isInteractive) {
+          const sel = buildSelector(child);
+          children.push({
+            el_id: `el_${stableHash(sel)}`,
+            tag,
+            text,
+            class: (_d = (_c2 = child.className) == null ? void 0 : _c2.toString().slice(0, 60)) != null ? _d : ""
+          });
+        }
+        if (!isInteractive || child.children.length > 0) {
+          collectInteractive(child, depth + 1);
+        }
+      }
+    };
+    collectInteractive(domEl, 0);
     return {
       el_id: elId,
       type: element.type,
@@ -81996,19 +82028,41 @@ var DOMExecutor = class {
     this.scanner = scanner;
   }
   findElement(el_id) {
+    var _a2, _b2;
     const { elements } = this.scanner.scan();
     const element = elements.find((e2) => e2.id === el_id);
-    if (!element) {
-      return { error: `Element '${el_id}' not found in snapshot` };
+    if (element) {
+      if (!element.visible) {
+        return { error: `Element '${el_id}' is not visible` };
+      }
+      const domEl = document.querySelector(element.selector);
+      if (!domEl) {
+        return { error: `Element '${el_id}' not found in snapshot` };
+      }
+      return { element, domEl };
     }
-    if (!element.visible) {
-      return { error: `Element '${el_id}' is not visible` };
+    const hash = el_id.replace(/^el_/, "");
+    const candidates = document.querySelectorAll("a, button, input, select, textarea, [role], [onclick]");
+    for (const domEl of Array.from(candidates)) {
+      const sel = buildSelector(domEl);
+      if (stableHash(sel) === hash) {
+        const rect = domEl.getBoundingClientRect();
+        const style = window.getComputedStyle(domEl);
+        const visible = style.display !== "none" && style.visibility !== "hidden" && rect.width > 0 && rect.height > 0;
+        if (!visible) {
+          return { error: `Element '${el_id}' is not visible` };
+        }
+        const element2 = {
+          id: el_id,
+          type: domEl.tagName.toLowerCase(),
+          text: (_b2 = (_a2 = domEl.textContent) == null ? void 0 : _a2.trim().slice(0, 100)) != null ? _b2 : null,
+          selector: sel,
+          visible: true
+        };
+        return { element: element2, domEl };
+      }
     }
-    const domEl = document.querySelector(element.selector);
-    if (!domEl) {
-      return { error: `Element '${el_id}' not found in snapshot` };
-    }
-    return { element, domEl };
+    return { error: `Element '${el_id}' not found in snapshot` };
   }
   click(el_id) {
     const result = this.findElement(el_id);
@@ -82418,7 +82472,17 @@ var FloatButton = class {
       this.el.style.left = "";
     }
     if (config.icon_url) {
-      this.iconEl.innerHTML = `<img src="${config.icon_url}" width="28" height="28" alt="" style="border-radius:50%;object-fit:cover;" data-aa-sdk="true" />`;
+      const image = document.createElement("img");
+      image.src = config.icon_url;
+      image.width = image.height = 28;
+      image.alt = "";
+      image.style.cssText = "border-radius:4px;object-fit:contain;";
+      image.setAttribute("data-aa-sdk", "true");
+      image.onerror = () => {
+        if (this.iconEl.contains(image))
+          this.iconEl.innerHTML = AA_ICON_SVG;
+      };
+      this.iconEl.replaceChildren(image);
     } else {
       this.iconEl.innerHTML = AA_ICON_SVG;
     }
@@ -82459,6 +82523,10 @@ function inlineRender(text) {
   s = s.replace(/`([^`]+)`/g, '<code style="background:#E5E7EB;padding:1px 5px;border-radius:3px;font-size:0.9em;">$1</code>');
   s = s.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
   s = s.replace(/\*(.+?)\*/g, "<em>$1</em>");
+  s = s.replace(
+    /!\[([^\]]*)\]\(([^)\s]+)\)/g,
+    '<img src="$2" alt="$1" data-aa-sdk="true" loading="lazy" style="display:block;max-width:100%;max-height:240px;width:auto;height:auto;object-fit:contain;margin:6px 0;border-radius:6px;" />'
+  );
   s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener" style="color:#2563EB;text-decoration:underline;">$1</a>');
   return s;
 }
@@ -83634,7 +83702,17 @@ var ChatPanel = class {
     </span>`;
   }
   applyLogoUrl(logoUrl) {
-    this.logoEl.innerHTML = `<img src="${logoUrl}" width="22" height="22" alt="Logo" style="border-radius:4px;object-fit:cover;" data-aa-sdk="true" />`;
+    const image = document.createElement("img");
+    image.src = logoUrl;
+    image.width = image.height = 22;
+    image.alt = "Logo";
+    image.style.cssText = "border-radius:4px;object-fit:contain;";
+    image.setAttribute("data-aa-sdk", "true");
+    image.onerror = () => {
+      if (this.logoEl.contains(image))
+        this.logoEl.innerHTML = AA_LOGO_SVG;
+    };
+    this.logoEl.replaceChildren(image);
   }
 };
 
@@ -84276,7 +84354,7 @@ function getSDKInstance() {
   return _sdkInstance;
 }
 async function init4(options) {
-  var _a2, _b2, _c2, _d, _e, _f, _g, _h;
+  var _a2, _b2, _c2, _d, _e, _f, _g, _h, _i, _j;
   const { channelKey } = options;
   const apiBase = (_a2 = options.apiBase) != null ? _a2 : "";
   const pageScanner = new PageScanner();
@@ -84320,19 +84398,21 @@ async function init4(options) {
     permission_scope: (_c2 = rawConfig.permission_scope) != null ? _c2 : {}
   } : DEFAULT_CONFIG2;
   const chatPanel = new ChatPanel(config.theme.chat_panel, (_e = (_d = config.theme.float_button) == null ? void 0 : _d.position) != null ? _e : "bottom-right");
-  const floatButton = new FloatButton(config.theme.float_button, () => {
+  const floatButton = new FloatButton(__spreadProps(__spreadValues(__spreadValues({}, DEFAULT_CONFIG2.theme.float_button), config.theme.float_button), {
+    icon_url: ((_f = config.theme.float_button) == null ? void 0 : _f.icon_url) || ((_g = config.theme.chat_panel) == null ? void 0 : _g.logo_url)
+  }), () => {
     if (chatPanel.getElement().style.display !== "none") {
       chatPanel.hide();
     } else {
       chatPanel.show();
     }
   });
-  const welcomeMsg = (_f = config.theme.chat_panel) == null ? void 0 : _f.welcome_message;
+  const welcomeMsg = (_h = config.theme.chat_panel) == null ? void 0 : _h.welcome_message;
   if (welcomeMsg) {
     chatPanel.addMessage("assistant", "done", welcomeMsg);
   }
   const stepTracker = new StepTracker(chatPanel.getMessageListEl());
-  const confirmDialog = new ConfirmDialog(chatPanel, (_h = (_g = config.theme.chat_panel) == null ? void 0 : _g.primary_color) != null ? _h : "#6366F1");
+  const confirmDialog = new ConfirmDialog(chatPanel, (_j = (_i = config.theme.chat_panel) == null ? void 0 : _i.primary_color) != null ? _j : "#6366F1");
   sdk.setDialogHandler(async (params) => {
     var _a3, _b3;
     if (params.action === "confirm") {

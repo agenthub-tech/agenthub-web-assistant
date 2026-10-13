@@ -89,7 +89,11 @@ export async function init(options: InitOptions): Promise<void> {
 
   // 5. Instantiate UI components with channel theme
   const chatPanel = new ChatPanel(config.theme.chat_panel, config.theme.float_button?.position ?? 'bottom-right');
-  const floatButton = new FloatButton(config.theme.float_button, () => {
+  const floatButton = new FloatButton({
+    ...DEFAULT_CONFIG.theme.float_button,
+    ...config.theme.float_button,
+    icon_url: config.theme.float_button?.icon_url || config.theme.chat_panel?.logo_url,
+  }, () => {
     if (chatPanel.getElement().style.display !== 'none') {
       chatPanel.hide();
     } else {

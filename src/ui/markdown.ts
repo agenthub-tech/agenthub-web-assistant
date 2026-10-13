@@ -3,9 +3,10 @@
  *
  * Supports: **bold**, *italic*, `inline code`, ```code blocks```,
  * unordered lists (- / *), ordered lists (1.), headings (#–###),
- * links [text](url), and line breaks.
+ * links [text](url), images ![alt](url), and line breaks.
  *
  * Designed to be tiny (no external deps) and XSS-safe via escaping.
+ * All emitted elements carry data-aa-sdk="true" so hosts can scope SDK-owned DOM.
  */
 
 const ESC: Record<string, string> = {
@@ -29,6 +30,12 @@ function inlineRender(text: string): string {
   s = s.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
   // italic
   s = s.replace(/\*(.+?)\*/g, '<em>$1</em>');
+  // images — MUST run before the link rule below, otherwise ![alt](url)
+  // is consumed by the link pattern and degrades into "!" + <a>
+  s = s.replace(
+    /!\[([^\]]*)\]\(([^)\s]+)\)/g,
+    '<img src="$2" alt="$1" data-aa-sdk="true" loading="lazy" style="display:block;max-width:100%;max-height:240px;width:auto;height:auto;object-fit:contain;margin:6px 0;border-radius:6px;" />',
+  );
   // links
   s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener" style="color:#2563EB;text-decoration:underline;">$1</a>');
   return s;

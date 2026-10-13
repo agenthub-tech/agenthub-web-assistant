@@ -1284,6 +1284,15 @@ export class ChatPanel {
   }
 
   private applyLogoUrl(logoUrl: string): void {
-    this.logoEl.innerHTML = `<img src="${logoUrl}" width="22" height="22" alt="Logo" style="border-radius:4px;object-fit:cover;" data-aa-sdk="true" />`;
+    const image = document.createElement('img');
+    image.src = logoUrl;
+    image.width = image.height = 22;
+    image.alt = 'Logo';
+    image.style.cssText = 'border-radius:4px;object-fit:contain;';
+    image.setAttribute('data-aa-sdk', 'true');
+    image.onerror = () => {
+      if (this.logoEl.contains(image)) this.logoEl.innerHTML = AA_LOGO_SVG;
+    };
+    this.logoEl.replaceChildren(image);
   }
 }
