@@ -82672,7 +82672,7 @@ var ChatPanel = class {
     this.stopHandler = null;
     this.visible = false;
     this.pendingFiles = [];
-    var _a2, _b2;
+    var _a2, _b2, _c2;
     this.primaryColor = (_a2 = theme2 == null ? void 0 : theme2.primary_color) != null ? _a2 : DEFAULT_PRIMARY_COLOR;
     this.backgroundColor = isValidHexColor(theme2 == null ? void 0 : theme2.background_color) ? theme2.background_color : DEFAULT_BACKGROUND_COLOR;
     this.fontFamily = (_b2 = theme2 == null ? void 0 : theme2.font_family) != null ? _b2 : DEFAULT_FONT_FAMILY2;
@@ -82718,13 +82718,15 @@ var ChatPanel = class {
     this.logoEl.innerHTML = AA_LOGO_SVG;
     const titleEl = document.createElement("span");
     titleEl.setAttribute("data-aa-sdk", "true");
-    titleEl.style.cssText = `font-size:15px;font-weight:600;color:#ffffff;font-family:${this.fontFamily};`;
-    titleEl.textContent = "AA \u52A9\u624B";
+    titleEl.style.cssText = `font-size:15px;font-weight:600;color:#ffffff;font-family:${this.fontFamily};min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;`;
+    titleEl.textContent = ((_c2 = theme2 == null ? void 0 : theme2.title) == null ? void 0 : _c2.trim()) || "AA \u52A9\u624B";
+    titleEl.title = titleEl.textContent;
     this.threadToggleBtn = document.createElement("button");
     this.threadToggleBtn.setAttribute("data-aa-sdk", "true");
     this.threadToggleBtn.setAttribute("aria-label", "\u4F1A\u8BDD\u5217\u8868");
     this.threadToggleBtn.style.cssText = `
       margin-left: auto;
+      flex-shrink: 0;
       background: none;
       border: none;
       cursor: pointer;

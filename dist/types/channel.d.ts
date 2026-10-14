@@ -4,6 +4,7 @@ export interface FloatButtonTheme {
     icon_url?: string;
 }
 export interface ChatPanelTheme {
+    title?: string | null;
     logo_url?: string;
     primary_color: string;
     background_color?: string;

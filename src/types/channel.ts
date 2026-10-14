@@ -8,6 +8,7 @@ export interface FloatButtonTheme {
 }
 
 export interface ChatPanelTheme {
+  title?: string | null;
   logo_url?: string;
   primary_color: string;
   background_color?: string;

@@ -169,8 +169,9 @@ export class ChatPanel {
 
     const titleEl = document.createElement('span');
     titleEl.setAttribute('data-aa-sdk', 'true');
-    titleEl.style.cssText = `font-size:15px;font-weight:600;color:#ffffff;font-family:${this.fontFamily};`;
-    titleEl.textContent = 'AA 助手';
+    titleEl.style.cssText = `font-size:15px;font-weight:600;color:#ffffff;font-family:${this.fontFamily};min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;`;
+    titleEl.textContent = theme?.title?.trim() || 'AA 助手';
+    titleEl.title = titleEl.textContent;
 
     // Thread list toggle button (hamburger icon)
     this.threadToggleBtn = document.createElement('button');
@@ -178,6 +179,7 @@ export class ChatPanel {
     this.threadToggleBtn.setAttribute('aria-label', '会话列表');
     this.threadToggleBtn.style.cssText = `
       margin-left: auto;
+      flex-shrink: 0;
       background: none;
       border: none;
       cursor: pointer;
