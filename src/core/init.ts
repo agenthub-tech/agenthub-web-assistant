@@ -58,12 +58,7 @@ export async function init(options: InitOptions): Promise<void> {
       channelKey,
       skills: webSkills,
       apiBase,
-      user: options.user ? {
-        userId: options.user.userId,
-        name: options.user.name,
-        avatar: options.user.avatar,
-        metadata: options.user.metadata,
-      } : undefined,
+      user: options.user,
     });
   } catch (err) {
     console.error('[AA Web Assistant] SDK init failed:', err);

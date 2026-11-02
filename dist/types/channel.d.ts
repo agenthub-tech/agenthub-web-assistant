@@ -21,6 +21,7 @@ export interface ChannelConfig {
 }
 export interface UserIdentity {
     userId: string;
+    account?: string;
     name?: string;
     avatar?: string;
     metadata?: Record<string, unknown>;

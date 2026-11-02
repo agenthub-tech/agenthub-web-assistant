@@ -80238,14 +80238,14 @@
     }
   });
 
-  // node_modules/agenthub-sdk/dist/core/sdk.js
+  // ../../sdks/js/src/core/sdk.ts
   var import_events = __toESM(require_events());
 
-  // node_modules/agenthub-sdk/dist/core/types.js
+  // ../../sdks/js/src/core/types.ts
   var SDK_VERSION = "1.0.0";
   var DEFAULT_PROTOCOL_VERSION = "1.0.0";
 
-  // node_modules/agenthub-sdk/dist/core/sdk.js
+  // ../../sdks/js/src/core/sdk.ts
   var KNOWN_EVENT_TYPES = /* @__PURE__ */ new Set([
     "RunStarted",
     "RunFinished",
@@ -80259,6 +80259,9 @@
     "StateSnapshotEvent",
     "Error"
   ]);
+  function isRecord(value) {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
+  }
   var WebAASDK = class {
     constructor() {
       this._channelId = null;
@@ -80267,22 +80270,32 @@
       this._runId = null;
       this._threadId = null;
       this._userId = null;
+      this._userAccount = null;
+      this._sourceSessionToken = null;
+      this._pendingSourceRevocations = /* @__PURE__ */ new Map();
       this._skills = /* @__PURE__ */ new Map();
       this._localSkills = /* @__PURE__ */ new Map();
       this._apiBase = "";
       this._protocolVersion = DEFAULT_PROTOCOL_VERSION;
       this._channelConfig = null;
       this._debug = false;
+      this._runtimeMode = "agent";
+      this._providerSocket = null;
+      this._providerOptions = null;
+      // Connection lifecycle configuration
       this._maxRetries = 3;
       this._retryDelay = 1e3;
       this._heartbeatTimeout = 45e3;
+      // Connection lifecycle state
       this._disconnected = false;
       this._activeReader = null;
       this._reconnectTimer = null;
       this._heartbeatTimer = null;
       this._onIdentifyCallbacks = [];
       this._onResetCallbacks = [];
+      // L1 SDK Auto Cache
       this._skillCache = /* @__PURE__ */ new Map();
+      // Dialog handler
       this._dialogHandler = null;
     }
     // ── Debug Logging ──
@@ -80310,14 +80323,33 @@
       const data = await response.json();
       this._accessToken = data.access_token;
     }
+    async _readErrorMessage(response) {
+      var _a2, _b2;
+      const body = await response.json().catch(() => ({ detail: response.statusText }));
+      return (_b2 = (_a2 = body.detail) != null ? _a2 : body.message) != null ? _b2 : response.statusText;
+    }
+    async _fetchWithAuthRetry(input, init6 = {}, isRetryAfterRefresh = false) {
+      var _a2;
+      if (!this._accessToken) {
+        throw new Error("SDK not initialized");
+      }
+      const headers = new Headers((_a2 = init6.headers) != null ? _a2 : {});
+      headers.set("Authorization", `Bearer ${this._accessToken}`);
+      const response = await fetch(input, __spreadProps(__spreadValues({}, init6), {
+        headers
+      }));
+      if (response.status === 401 && !isRetryAfterRefresh) {
+        await this._acquireToken();
+        return this._fetchWithAuthRetry(input, init6, true);
+      }
+      return response;
+    }
     /**
      * Fetch channel configuration from GET /api/config.
      */
     async _fetchChannelConfig() {
       try {
-        const response = await fetch(`${this._apiBase}/api/config`, {
-          headers: { "Authorization": `Bearer ${this._accessToken}` }
-        });
+        const response = await this._fetchWithAuthRetry(`${this._apiBase}/api/config`);
         if (!response.ok)
           return null;
         return await response.json();
@@ -80329,7 +80361,7 @@
      * Initialize the SDK.
      */
     async init(options) {
-      var _a2, _b2, _c2, _d, _e, _f, _g, _h, _i;
+      var _a2, _b2, _c2, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m;
       this._apiBase = (_a2 = options.apiBase) != null ? _a2 : "";
       this._channelKey = options.channelKey;
       this._protocolVersion = (_b2 = options.protocolVersion) != null ? _b2 : DEFAULT_PROTOCOL_VERSION;
@@ -80337,9 +80369,10 @@
       this._retryDelay = (_d = options.retryDelay) != null ? _d : 1e3;
       this._heartbeatTimeout = (_e = options.heartbeatTimeout) != null ? _e : 45e3;
       this._debug = (_f = options.debug) != null ? _f : false;
+      this._runtimeMode = (_g = options.runtimeMode) != null ? _g : "agent";
       this._disconnected = false;
       this._log("init start | apiBase=%s channelKey=%s", this._apiBase, this._channelKey);
-      const skills = (_g = options.skills) != null ? _g : [];
+      const skills = (_h = options.skills) != null ? _h : [];
       for (const skill of skills) {
         this._skills.set(skill.name, skill);
       }
@@ -80348,26 +80381,31 @@
       this._channelConfig = await this._fetchChannelConfig();
       this._log("config fetched");
       if (skills.length > 0) {
-        const skillsMeta = skills.map(({ name, schema, promptInjection, executionMode, resultCacheFields }) => __spreadValues({
+        const skillsMeta = skills.map(({ name, schema, promptInjection, executionMode, resultCacheFields, nonSummaryResultFields }) => __spreadValues(__spreadValues({
           name,
           schema,
           prompt_injection: promptInjection != null ? promptInjection : null,
           execution_mode: executionMode
-        }, resultCacheFields ? { result_cache_fields: resultCacheFields } : {}));
-        const response = await fetch(`${this._apiBase}/api/sdk/register`, {
+        }, resultCacheFields ? { result_cache_fields: resultCacheFields } : {}), nonSummaryResultFields ? { non_summary_result_fields: nonSummaryResultFields } : {}));
+        const response = await this._fetchWithAuthRetry(`${this._apiBase}/api/sdk/register`, {
           method: "POST",
           headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${this._accessToken}`
+            "Content-Type": "application/json"
           },
           body: JSON.stringify({
             skills: skillsMeta,
-            protocol_version: this._protocolVersion
+            protocol_version: this._protocolVersion,
+            runtime_mode: this._runtimeMode,
+            instance_id: (_i = options.instanceId) != null ? _i : null,
+            provider_id: (_j = options.providerId) != null ? _j : null,
+            capacity: Math.max(1, (_k = options.capacity) != null ? _k : 1),
+            runtime: (_l = options.runtime) != null ? _l : "javascript",
+            sdk_version: SDK_VERSION,
+            metadata: (_m = options.metadata) != null ? _m : {}
           })
         });
         if (!response.ok) {
-          const body = await response.json().catch(() => ({ detail: response.statusText }));
-          const message = (_i = (_h = body.detail) != null ? _h : body.message) != null ? _i : response.statusText;
+          const message = await this._readErrorMessage(response);
           throw new Error(`Register failed (${response.status}): ${message}`);
         }
         const data = await response.json();
@@ -80379,13 +80417,109 @@
         this._log("user identified | userId=%s", options.user.userId);
       }
       this._registerBuiltinSkillHandlers();
+      if (this._runtimeMode === "skill_provider") {
+        if (!options.providerId)
+          throw new Error("skill_provider mode requires providerId");
+        if (skills.length === 0)
+          throw new Error("skill_provider mode requires at least one skill");
+        await this._startSkillProvider(options);
+      }
       this._log("init complete");
+    }
+    async _startSkillProvider(options) {
+      var _a2;
+      this._providerOptions = options;
+      const WebSocketImpl = typeof globalThis.WebSocket !== "undefined" ? globalThis.WebSocket : (await new Function("specifier", "return import(specifier)")("ws")).default;
+      const wsBase = this._apiBase.replace(/^https:/, "wss:").replace(/^http:/, "ws:");
+      const socket = new WebSocketImpl(`${wsBase}/api/sdk/providers/ws?access_token=${encodeURIComponent((_a2 = this._accessToken) != null ? _a2 : "")}`);
+      this._providerSocket = socket;
+      await new Promise((resolve, reject) => {
+        let registered = false;
+        const onOpen = () => {
+          var _a3, _b2, _c2, _d;
+          socket.send(JSON.stringify({
+            type: "provider.register",
+            provider_id: options.providerId,
+            instance_id: (_a3 = options.instanceId) != null ? _a3 : options.providerId,
+            skills: [...this._skills.keys()],
+            capacity: Math.max(1, (_b2 = options.capacity) != null ? _b2 : 1),
+            runtime: (_c2 = options.runtime) != null ? _c2 : "javascript",
+            sdk_version: SDK_VERSION,
+            metadata: (_d = options.metadata) != null ? _d : {}
+          }));
+        };
+        const onMessage = async (event) => {
+          var _a3, _b2, _c2, _d;
+          const raw = typeof event.data === "string" ? event.data : event.data.toString();
+          const message = JSON.parse(raw);
+          if (message.type === "provider.registered") {
+            registered = true;
+            resolve();
+            return;
+          }
+          if (message.type !== "skill.execute")
+            return;
+          const skill = this._skills.get(String((_a3 = message.skill_name) != null ? _a3 : ""));
+          try {
+            if (!skill)
+              throw new Error(`Skill '${message.skill_name}' not registered locally`);
+            const params = isRecord(message.params) ? message.params : {};
+            const reportProgress = async (progress) => {
+              socket.send(JSON.stringify({
+                type: "skill.progress",
+                execution_id: message.execution_id,
+                run_id: message.run_id,
+                tool_call_id: message.tool_call_id,
+                progress
+              }));
+            };
+            const result = skill.executeWithContext ? await skill.executeWithContext(params, {
+              executionId: String((_b2 = message.execution_id) != null ? _b2 : ""),
+              runId: String((_c2 = message.run_id) != null ? _c2 : ""),
+              toolCallId: String((_d = message.tool_call_id) != null ? _d : ""),
+              reportProgress
+            }) : await skill.execute(params);
+            socket.send(JSON.stringify({ type: "skill.result", execution_id: message.execution_id, result }));
+          } catch (error2) {
+            socket.send(JSON.stringify({
+              type: "skill.error",
+              execution_id: message.execution_id,
+              error: { message: error2 instanceof Error ? error2.message : String(error2) }
+            }));
+          }
+        };
+        const onError = (error2) => {
+          if (!registered)
+            reject(error2);
+        };
+        const onClose = () => {
+          if (!this._disconnected && this._providerOptions) {
+            this._reconnectTimer = setTimeout(() => {
+              this._acquireToken().then(() => this._startSkillProvider(this._providerOptions)).catch((error2) => this._log("provider reconnect failed | %s", String(error2)));
+            }, this._retryDelay);
+          }
+        };
+        if (typeof socket.addEventListener === "function") {
+          socket.addEventListener("open", onOpen);
+          socket.addEventListener("message", onMessage);
+          socket.addEventListener("error", onError, { once: true });
+          socket.addEventListener("close", onClose, { once: true });
+        } else {
+          socket.on("open", onOpen);
+          socket.on("message", (data) => onMessage({ data }));
+          socket.once("error", onError);
+          socket.once("close", onClose);
+        }
+      });
     }
     /**
      * Send a user prompt to the agent and return an EventEmitter that streams AG-UI events.
      */
     run(options) {
       var _a2;
+      if (this._runtimeMode === "skill_provider") {
+        throw new Error("run() is unavailable in skill_provider mode");
+      }
       const emitter = new import_events.EventEmitter();
       this._disconnected = false;
       if (options.runId) {
@@ -80416,6 +80550,10 @@
           body.run_id = options.runId;
         if (options.toolResult !== void 0)
           body.tool_result = options.toolResult;
+        if (options.reasoning !== void 0)
+          body.reasoning = options.reasoning;
+        if (options.webSearchEnabled !== void 0)
+          body.web_search_enabled = options.webSearchEnabled;
         if (this._userId)
           body.user_id = this._userId;
         if (options.threadId !== void 0) {
@@ -80435,21 +80573,25 @@
             formData.append("user_id", String(body.user_id));
           if (body.thread_id !== void 0)
             formData.append("thread_id", String(body.thread_id));
+          if (body.reasoning !== void 0)
+            formData.append("reasoning", JSON.stringify(body.reasoning));
+          if (body.web_search_enabled !== void 0)
+            formData.append("web_search_enabled", String(body.web_search_enabled));
           for (const file of options.files) {
             formData.append("files", file);
           }
           response = await fetch(`${this._apiBase}/api/agent/run`, {
             method: "POST",
-            headers: { "Authorization": `Bearer ${this._accessToken}` },
+            headers: __spreadValues({ "Authorization": `Bearer ${this._accessToken}` }, this._sourceSessionToken ? { "X-AgentHub-Source-Session": this._sourceSessionToken } : {}),
             body: formData
           });
         } else {
           response = await fetch(`${this._apiBase}/api/agent/run`, {
             method: "POST",
-            headers: {
+            headers: __spreadValues({
               "Content-Type": "application/json",
               "Authorization": `Bearer ${this._accessToken}`
-            },
+            }, this._sourceSessionToken ? { "X-AgentHub-Source-Session": this._sourceSessionToken } : {}),
             body: JSON.stringify(body)
           });
         }
@@ -80472,7 +80614,7 @@
             emitter.emit("error", error2);
             return;
           }
-          if (retryCount < this._maxRetries && !this._disconnected) {
+          if (this._canRetryStream(options, retryCount)) {
             this._scheduleReconnect(options, emitter, retryCount);
             return;
           }
@@ -80488,7 +80630,7 @@
         if (this._disconnected)
           return;
         const error2 = err instanceof Error ? err : new Error(String(err));
-        if (retryCount < this._maxRetries && !this._disconnected) {
+        if (this._canRetryStream(options, retryCount)) {
           this._scheduleReconnect(options, emitter, retryCount);
           return;
         }
@@ -80505,6 +80647,9 @@
         }
       }, this._retryDelay);
     }
+    _canRetryStream(options, retryCount) {
+      return options.toolResult === void 0 && retryCount < this._maxRetries && !this._disconnected;
+    }
     _resetHeartbeat(options, emitter, retryCount) {
       this._clearHeartbeat();
       if (this._disconnected)
@@ -80520,10 +80665,11 @@
           }
           this._activeReader = null;
         }
-        if (retryCount < this._maxRetries) {
+        if (this._canRetryStream(options, retryCount)) {
           this._scheduleReconnect(options, emitter, retryCount);
         } else {
-          emitter.emit("error", new Error("Heartbeat timeout: no events received"));
+          const message = options.toolResult === void 0 ? "Heartbeat timeout: no events received" : "Heartbeat timeout during run resume; tool_result was not replayed";
+          emitter.emit("error", new Error(message));
         }
       }, this._heartbeatTimeout);
     }
@@ -80548,9 +80694,14 @@
           const { done, value } = await reader.read();
           if (done) {
             this._clearHeartbeat();
-            if (!receivedFinish && !this._disconnected && retryCount < this._maxRetries) {
-              this._scheduleReconnect(options, emitter, retryCount);
-              return;
+            if (!receivedFinish && !this._disconnected) {
+              if (this._canRetryStream(options, retryCount)) {
+                this._scheduleReconnect(options, emitter, retryCount);
+                return;
+              }
+              if (options.toolResult !== void 0) {
+                emitter.emit("error", new Error("Run resume stream ended before completion; tool_result was not replayed"));
+              }
             }
             break;
           }
@@ -80647,7 +80798,17 @@
                 } catch (e2) {
                   this._log("token refresh failed before resume: %s", e2 instanceof Error ? e2.message : String(e2));
                 }
-                await this._startSSEStream({ userInput: "", runId: (_f = this._runId) != null ? _f : void 0, toolResult }, emitter, 0);
+                await this._startSSEStream(
+                  {
+                    userInput: "",
+                    runId: (_f = this._runId) != null ? _f : void 0,
+                    toolResult,
+                    reasoning: options.reasoning,
+                    webSearchEnabled: options.webSearchEnabled
+                  },
+                  emitter,
+                  0
+                );
                 return;
               }
             }
@@ -80657,7 +80818,7 @@
         this._clearHeartbeat();
         if (this._disconnected)
           return;
-        if (retryCount < this._maxRetries && !this._disconnected) {
+        if (this._canRetryStream(options, retryCount)) {
           this._scheduleReconnect(options, emitter, retryCount);
           return;
         }
@@ -80671,26 +80832,39 @@
      * Identify the current end user.
      */
     async identify(user) {
-      var _a2, _b2, _c2, _d;
+      var _a2, _b2, _c2, _d, _e;
+      if (!this._sourceSessionToken && this._pendingSourceRevocations.size)
+        await this.revokeSourceSession();
+      if (this._sourceSessionToken && (this._userId !== user.userId || user.account !== void 0 && this._userAccount !== user.account || user.sourceSessionToken && user.sourceSessionToken !== this._sourceSessionToken)) {
+        this.disconnect();
+        this._runId = null;
+        this._threadId = null;
+        await this.revokeSourceSession("ACCOUNT_SWITCH");
+        this._disconnected = false;
+      }
+      this._userAccount = (_a2 = user.account) != null ? _a2 : this._userId === user.userId ? this._userAccount : null;
       this._userId = user.userId;
+      if (user.sourceSessionToken)
+        this._sourceSessionToken = user.sourceSessionToken;
+      this._disconnected = false;
       if (!this._accessToken)
         return;
-      const response = await fetch(`${this._apiBase}/api/sdk/identify`, {
+      const response = await this._fetchWithAuthRetry(`${this._apiBase}/api/sdk/identify`, {
         method: "POST",
         headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${this._accessToken}`
+          "Content-Type": "application/json"
         },
         body: JSON.stringify({
           user_id: user.userId,
-          name: (_a2 = user.name) != null ? _a2 : null,
-          avatar: (_b2 = user.avatar) != null ? _b2 : null,
-          metadata: (_c2 = user.metadata) != null ? _c2 : {}
+          account: (_b2 = user.account) != null ? _b2 : null,
+          name: (_c2 = user.name) != null ? _c2 : null,
+          avatar: (_d = user.avatar) != null ? _d : null,
+          metadata: (_e = user.metadata) != null ? _e : {}
         })
       });
       if (!response.ok) {
-        const body = await response.json().catch(() => ({ detail: response.statusText }));
-        throw new Error(`Identify failed (${response.status}): ${(_d = body.detail) != null ? _d : response.statusText}`);
+        const message = await this._readErrorMessage(response);
+        throw new Error(`Identify failed (${response.status}): ${message}`);
       }
       for (const cb of this._onIdentifyCallbacks) {
         try {
@@ -80703,22 +80877,20 @@
       this._onIdentifyCallbacks.push(callback);
     }
     async createThread(title) {
-      var _a2;
       if (!this._userId)
         throw new Error("Call identify() before creating threads");
       if (!this._accessToken)
         throw new Error("SDK not initialized");
-      const response = await fetch(`${this._apiBase}/api/sdk/threads`, {
+      const response = await this._fetchWithAuthRetry(`${this._apiBase}/api/sdk/threads`, {
         method: "POST",
         headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${this._accessToken}`
+          "Content-Type": "application/json"
         },
         body: JSON.stringify({ user_id: this._userId, title: title != null ? title : null })
       });
       if (!response.ok) {
-        const body = await response.json().catch(() => ({ detail: response.statusText }));
-        throw new Error(`Create thread failed: ${(_a2 = body.detail) != null ? _a2 : response.statusText}`);
+        const message = await this._readErrorMessage(response);
+        throw new Error(`Create thread failed: ${message}`);
       }
       const data = await response.json();
       this._threadId = data.id;
@@ -80737,18 +80909,15 @@
       return null;
     }
     async switchThread(threadId) {
-      var _a2;
       if (!this._accessToken)
         throw new Error("SDK not initialized");
       this.disconnect();
       this._runId = null;
       this._threadId = threadId;
-      const response = await fetch(`${this._apiBase}/api/sdk/threads/${encodeURIComponent(threadId)}`, {
-        headers: { "Authorization": `Bearer ${this._accessToken}` }
-      });
+      const response = await this._fetchWithAuthRetry(`${this._apiBase}/api/sdk/threads/${encodeURIComponent(threadId)}`);
       if (!response.ok) {
-        const body = await response.json().catch(() => ({ detail: response.statusText }));
-        throw new Error(`Switch thread failed: ${(_a2 = body.detail) != null ? _a2 : response.statusText}`);
+        const message = await this._readErrorMessage(response);
+        throw new Error(`Switch thread failed: ${message}`);
       }
       return response.json();
     }
@@ -80760,9 +80929,7 @@
         limit: String(limit),
         offset: String(offset)
       });
-      const response = await fetch(`${this._apiBase}/api/sdk/threads?${params}`, {
-        headers: { "Authorization": `Bearer ${this._accessToken}` }
-      });
+      const response = await this._fetchWithAuthRetry(`${this._apiBase}/api/sdk/threads?${params}`);
       if (!response.ok)
         return [];
       return response.json();
@@ -80797,6 +80964,14 @@
         }
         this._activeReader = null;
       }
+      if (this._providerSocket) {
+        try {
+          this._providerSocket.close();
+        } catch (e2) {
+        }
+        this._providerSocket = null;
+      }
+      this._providerOptions = null;
     }
     /**
      * Reset user state (logout).
@@ -80804,7 +80979,9 @@
     reset() {
       this._log("reset");
       this.disconnect();
+      void this.revokeSourceSession("LOGOUT").catch(() => console.warn("\u6765\u6E90\u4F1A\u8BDD\u64A4\u9500\u672A\u786E\u8BA4\uFF1B\u4E1A\u52A1\u540E\u7AEF\u5E94\u91CD\u8BD5\u9000\u51FA\u901A\u77E5"));
       this._userId = null;
+      this._userAccount = null;
       this._runId = null;
       this._threadId = null;
       this._disconnected = false;
@@ -80818,6 +80995,42 @@
     }
     onReset(callback) {
       this._onResetCallbacks.push(callback);
+    }
+    /** Verify a fresh business-backend proof and bind this SDK to its login session. */
+    async authenticateSource(identityAssertion, integrationId) {
+      const response = await this._fetchWithAuthRetry(`${this._apiBase}/api/sdk/mcp/source-session`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ identity_assertion: identityAssertion, integration_id: integrationId })
+      });
+      if (!response.ok)
+        throw new Error(`\u6765\u6E90\u8EAB\u4EFD\u8BA4\u8BC1\u5931\u8D25 (${response.status})`);
+      const session = await response.json();
+      if (typeof session.session_token !== "string" || typeof session.source_subject !== "string")
+        throw new Error("\u6765\u6E90\u8EAB\u4EFD\u54CD\u5E94\u65E0\u6548");
+      await this.identify({ userId: session.source_subject, sourceSessionToken: session.session_token });
+    }
+    /** Call from business logout/account-switch handling; await acknowledgment. */
+    async revokeSourceSession(reason = "LOGOUT") {
+      const token = this._sourceSessionToken;
+      this._sourceSessionToken = null;
+      if (token) {
+        this.disconnect();
+        this._runId = null;
+        this._threadId = null;
+        this._pendingSourceRevocations.set(token, reason);
+      }
+      for (const [pendingToken, pendingReason] of this._pendingSourceRevocations) {
+        const response = await this._fetchWithAuthRetry(`${this._apiBase}/api/sdk/mcp/source-session/revoke`, {
+          method: "POST",
+          keepalive: true,
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ session_token: pendingToken, reason: pendingReason })
+        });
+        if (!response.ok)
+          throw new Error(`\u6765\u6E90\u4F1A\u8BDD\u64A4\u9500\u672A\u786E\u8BA4 (${response.status})`);
+        this._pendingSourceRevocations.delete(pendingToken);
+      }
     }
     // ── Built-in Skill Handlers ─────────────────────────────────────────────────
     _registerBuiltinSkillHandlers() {
@@ -84381,12 +84594,7 @@
         channelKey,
         skills: webSkills,
         apiBase,
-        user: options.user ? {
-          userId: options.user.userId,
-          name: options.user.name,
-          avatar: options.user.avatar,
-          metadata: options.user.metadata
-        } : void 0
+        user: options.user
       });
     } catch (err) {
       console.error("[AA Web Assistant] SDK init failed:", err);

@@ -7,11 +7,12 @@ const config = vi.hoisted(() => ({
     chat_panel: { primary_color: '#1677ff', logo_url: null as string | null },
   },
 }));
+const sdkInit = vi.hoisted(() => vi.fn());
 
 vi.mock('agenthub-sdk', () => ({
   WebAASDK: class {
     channelConfig = config;
-    async init() {}
+    async init(options: unknown) { sdkInit(options); }
     setDialogHandler() {}
     registerLocalSkill() {}
     onIdentify() {}
@@ -21,6 +22,7 @@ vi.mock('agenthub-sdk', () => ({
 
 describe('configured assistant logos', () => {
   beforeEach(() => {
+    sdkInit.mockClear();
     document.body.replaceChildren();
     sessionStorage.clear();
     config.ui_theme.float_button.icon_url = null;
@@ -36,6 +38,11 @@ describe('configured assistant logos', () => {
     await init({ channelKey: 'test', apiBase: 'https://example.com' });
     expect(document.querySelector('button[aria-label="AA 助手"] img')?.getAttribute('src')).toBe(config.ui_theme.chat_panel.logo_url);
     expect(document.querySelector('img[alt="Logo"]')?.getAttribute('src')).toBe(config.ui_theme.chat_panel.logo_url);
+  });
+
+  it('passes the domain account through assistant initialization', async () => {
+    await init({ channelKey: 'test', apiBase: 'https://example.com', user: { userId: 'employee-123', account: 'alice' } });
+    expect(sdkInit).toHaveBeenCalledWith(expect.objectContaining({ user: expect.objectContaining({ userId: 'employee-123', account: 'alice' }) }));
   });
 
   it('preserves an explicitly configured floating icon', async () => {

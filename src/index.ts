@@ -2,7 +2,7 @@
 // Used by both IIFE (index-iife.ts) and ESM (index-esm.ts) entry points
 
 import { init as _initInternal, getSDKInstance } from './core/init';
-import type { InitOptions } from './types/channel';
+import type { InitOptions, UserIdentity } from './types/channel';
 
 let _initPromise: Promise<void> | null = null;
 
@@ -18,7 +18,7 @@ async function _waitInit(): Promise<void> {
   }
 }
 
-async function identify(user: { userId: string; name?: string; avatar?: string; metadata?: Record<string, unknown> }) {
+async function identify(user: UserIdentity) {
   await _waitInit();
   const sdk = getSDKInstance();
   if (sdk) {

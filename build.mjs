@@ -5,6 +5,7 @@ import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const API_BASE_URL = process.env.AA_API_BASE || '';
+const localSdk = path.resolve(__dirname, '../../sdks/js/src/index.ts');
 
 const common = {
   entryPoints: ['src/index.ts'],
@@ -17,6 +18,8 @@ const common = {
   },
   // Resolve node_modules from this package's directory
   nodePaths: [path.resolve(__dirname, 'node_modules')],
+  // Repository builds must include the matching SDK, including identity fields.
+  alias: fs.existsSync(localSdk) ? { 'agenthub-sdk': localSdk } : {},
 };
 
 // IIFE bundle — for <script> tag usage (window.AA set inside code)

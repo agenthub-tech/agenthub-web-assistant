@@ -16,6 +16,8 @@
 
 export interface UserIdentity {
   userId: string;
+  /** AD sAMAccountName, independent of the application's userId. */
+  account?: string;
   name?: string;
   avatar?: string;
   metadata?: Record<string, unknown>;
