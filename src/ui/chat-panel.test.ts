@@ -104,13 +104,47 @@ describe('ChatPanel — 消息气泡管理 (14.2)', () => {
     expect(wrapper.innerHTML).toContain('aa-dot');
   });
 
-  it('appendDelta 追加文本到气泡', () => {
+  it('appendDelta 在下一帧合并更新气泡', async () => {
     const id = panel.addMessage('assistant', 'streaming');
     panel.appendDelta(id, 'Hello');
     panel.appendDelta(id, ' World');
+    await new Promise(requestAnimationFrame);
     const wrapper = panel.getMessageListEl().lastElementChild as HTMLElement;
     const contentEl = wrapper.querySelector('[data-aa-content]') as HTMLElement;
     expect(contentEl.textContent).toBe('Hello World');
+  });
+
+  it('同帧 100 个 delta 只安排一次渲染，结束时立即显示完整文本', () => {
+    const frame = vi.spyOn(window, 'requestAnimationFrame').mockReturnValue(101);
+    const cancel = vi.spyOn(window, 'cancelAnimationFrame').mockImplementation(() => {});
+    try {
+      const id = panel.addMessage('assistant', 'streaming');
+      for (let i = 0; i < 100; i++) panel.appendDelta(id, 'a');
+      expect(frame).toHaveBeenCalledTimes(1);
+      const content = panel.getMessageListEl().querySelector('[data-aa-content]')!;
+      expect(content.textContent).toBe('');
+      panel.setMessageState(id, 'done');
+      expect(content.textContent).toBe('a'.repeat(100));
+      expect(cancel).toHaveBeenCalledWith(101);
+    } finally {
+      frame.mockRestore();
+      cancel.mockRestore();
+    }
+  });
+
+  it('隐藏面板会取消未执行的渲染帧', () => {
+    const frame = vi.spyOn(window, 'requestAnimationFrame').mockReturnValue(102);
+    const cancel = vi.spyOn(window, 'cancelAnimationFrame').mockImplementation(() => {});
+    try {
+      panel.appendDelta(panel.addMessage('assistant', 'streaming'), 'buffered');
+      panel.hide();
+      expect(cancel).toHaveBeenCalledWith(102);
+      panel.show();
+      expect(panel.getMessageListEl().textContent).toContain('buffered');
+    } finally {
+      frame.mockRestore();
+      cancel.mockRestore();
+    }
   });
 
   it('setMessageState pending→streaming 清除 dots，显示内容', () => {
@@ -141,7 +175,7 @@ describe('ChatPanel — 消息气泡管理 (14.2)', () => {
     expect(bubble.style.background).toBe('rgb(254, 242, 242)');
   });
 
-  it('面板隐藏时 appendDelta 缓冲到内存，显示后呈现', () => {
+  it('面板隐藏时 appendDelta 缓冲到内存，显示后呈现', async () => {
     panel.hide();
     const id = panel.addMessage('assistant', 'streaming');
     panel.appendDelta(id, 'buffered');
@@ -154,6 +188,7 @@ describe('ChatPanel — 消息气泡管理 (14.2)', () => {
     // Show panel and trigger another delta to flush
     panel.show();
     panel.appendDelta(id, ' more');
+    await new Promise(requestAnimationFrame);
     expect(contentEl.textContent).toBe('buffered more');
   });
 
@@ -167,6 +202,7 @@ describe('ChatPanel — 消息气泡管理 (14.2)', () => {
           p.show();
           const id = p.addMessage('user', 'streaming');
           for (const d of deltas) p.appendDelta(id, d);
+          p.setMessageState(id, 'done');
           const wrapper = p.getMessageListEl().lastElementChild as HTMLElement;
           const contentEl = wrapper.querySelector('[data-aa-content]') as HTMLElement;
           const ok = contentEl.textContent === deltas.join('');
@@ -188,6 +224,7 @@ describe('ChatPanel — 消息气泡管理 (14.2)', () => {
           p.show();
           const id = p.addMessage('user', 'streaming');
           for (const d of deltas) p.appendDelta(id, d);
+          p.setMessageState(id, 'done');
           p.setMessageState(id, 'done');
           const wrapper = p.getMessageListEl().lastElementChild as HTMLElement;
           const contentEl = wrapper.querySelector('[data-aa-content]') as HTMLElement;

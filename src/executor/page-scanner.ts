@@ -34,6 +34,7 @@ const MAX_DETAIL_CHARS = 20000;
 const PREVIEW_ROWS = 2;
 
 interface DataTableData {
+  rowCount: number;
   table: Element;
   title: string;
   headers: string[];
@@ -132,7 +133,7 @@ function findTableTitle(table: Element): string {
  * skipped. Returns structured data (not text) so callers can build either
  * compact summaries or full detail views.
  */
-function collectDataTableData(): DataTableData[] {
+function collectDataTableData(rowLimit = Number.POSITIVE_INFINITY): DataTableData[] {
   const tables = Array.from(document.querySelectorAll('table'));
   const result: DataTableData[] = [];
 
@@ -158,7 +159,7 @@ function collectDataTableData(): DataTableData[] {
     );
     if (bodyRows.length === 0) continue;
 
-    const rows = bodyRows
+    const rows = bodyRows.slice(0, rowLimit)
       .map((tr) =>
         Array.from(tr.children).map(
           (td) => (td.textContent ?? '').trim().replace(/\s+/g, ' ')
@@ -170,6 +171,7 @@ function collectDataTableData(): DataTableData[] {
 
     result.push({
       table,
+      rowCount: bodyRows.length,
       title: findTableTitle(table),
       headers: computeHeaderLabels(table),
       rows,
@@ -764,58 +766,41 @@ export class PageScanner {
     const combined = SELECTORS.join(', ');
     const nodeList = document.querySelectorAll(combined);
     const raw: Element[] = [];
+    const rawSet = new Set<Element>();
+    const nativeAncestors = new Set<Element>();
+    const add = (el: Element) => {
+      if (rawSet.has(el)) return;
+      rawSet.add(el);
+      raw.push(el);
+      if (isNativeInteractive(el)) {
+        for (let parent = el.parentElement; parent; parent = parent.parentElement) nativeAncestors.add(parent);
+      }
+    };
 
     nodeList.forEach((el) => {
       if (!isSDKElement(el)) {
-        raw.push(el);
+        add(el);
       }
     });
-
-    // DEBUG: 无条件输出 <a> 收集情况（生产环境排查用，后续移除）
-    try {
-      const links = raw.filter((e) => e.tagName === 'A');
-      const noHref = links.filter((e) => !e.hasAttribute('href'));
-      if (noHref.length > 0) {
-        console.warn('[AA scan] href-less <a> collected:', noHref.map((e) => e.textContent?.trim()));
-      }
-    } catch (_) { /* noop */ }
 
     // Also find cursor:pointer elements not matched by selectors
     const allElements = document.querySelectorAll('div, span, li, img, svg, label, a');
     allElements.forEach((el) => {
-      if (!isSDKElement(el) && !raw.includes(el) && isClickable(el)) {
+      if (!isSDKElement(el) && !rawSet.has(el) && isClickable(el)) {
         // Skip if a parent is already in the list (avoid duplicating nested clickables).
         // Exception: elements inside table rows that have their own action semantics
         // (e.g. "修改"/"删除" links) should be kept even when the tr is also listed.
         let dominated = false;
-        for (const existing of raw) {
-          if (existing.contains(el) && existing !== el) {
-            // Don't skip if this element is a distinct action inside a table row
-            if (existing.tagName === 'TR' && isRowAction(el)) {
-              continue;
-            }
-            // Native interactive elements (a/button/input/...) are never
-            // dominated by layout containers (div/span/...) — e.g. an <a>
-            // action link inside a clickable div wrapper must stay clickable
-            // on its own, otherwise clicks land between sibling links.
-            if (isNativeInteractive(el) && !isNativeInteractive(existing)) {
-              continue;
-            }
-            dominated = true;
-            break;
-          }
-          // Reverse containment: this element is a layout wrapper around an
-          // already-collected native interactive element (e.g. ant-space div
-          // wrapping "完成"/"删除" links). The child is the real click target —
-          // skip the wrapper so the model doesn't click between the links.
-          if (el.contains(existing) && existing !== el
-              && isNativeInteractive(existing) && !isNativeInteractive(el)) {
-            dominated = true;
-            break;
-          }
+        for (let existing = el.parentElement; existing; existing = existing.parentElement) {
+          if (!rawSet.has(existing)) continue;
+          if (existing.tagName === 'TR' && isRowAction(el)) continue;
+          if (isNativeInteractive(el) && !isNativeInteractive(existing)) continue;
+          dominated = true;
+          break;
         }
+        if (!isNativeInteractive(el) && nativeAncestors.has(el)) dominated = true;
         if (!dominated) {
-          raw.push(el);
+          add(el);
         }
       }
     });
@@ -823,8 +808,8 @@ export class PageScanner {
     // Scan table body rows as clickable elements (Ant Design tables use tr click for selection)
     const tableRows = document.querySelectorAll('tbody > tr[class*="ant-table-row"], tbody > tr[data-row-key]');
     tableRows.forEach((tr) => {
-      if (!isSDKElement(tr) && !raw.includes(tr) && isVisible(tr)) {
-        raw.push(tr);
+      if (!isSDKElement(tr) && !rawSet.has(tr) && isVisible(tr)) {
+        add(tr);
       }
 
       // Also scan action elements inside table rows (修改/删除/编辑 buttons or links)
@@ -832,22 +817,30 @@ export class PageScanner {
       // Strategy: find leaf-level elements whose text is exactly an action word.
       const allDescendants = tr.querySelectorAll('a, button, [role="button"], span, div, td');
       allDescendants.forEach((actionEl) => {
-        if (!isSDKElement(actionEl) && !raw.includes(actionEl) && isVisible(actionEl)) {
+        if (!isSDKElement(actionEl) && !rawSet.has(actionEl) && isVisible(actionEl)) {
           const text = actionEl.textContent?.trim() ?? '';
           // Only leaf-level elements with exact action text (修改/删除/编辑 etc.)
           // Skip containers that combine multiple actions (e.g. "修改删除" wrapper)
           if (isActionText(text) && actionEl.children.length === 0) {
-            raw.push(actionEl);
+            add(actionEl);
           }
         }
       });
     });
 
     // 去重（同一元素可能匹配多个选择器）
-    const unique = Array.from(new Set(raw));
+    const unique = raw;
+    const selected: Element[] = [];
+    const hidden: Element[] = [];
+    for (const el of unique) {
+      if (isVisible(el)) selected.push(el);
+      else if (hidden.length < MAX_ELEMENTS) hidden.push(el);
+      if (selected.length >= MAX_ELEMENTS) break;
+    }
+    selected.push(...hidden.slice(0, MAX_ELEMENTS - selected.length));
 
     // 构建 DOMElement 列表（稳定 el_id：基于 selector 的短 hash，同一元素多次扫描 id 不变）
-    const all: DOMElement[] = unique.map((el) => {
+    const all: DOMElement[] = selected.map((el) => {
       const selector = buildSelector(el);
       const id = `el_${stableHash(selector)}`;
       const tag = el.tagName.toLowerCase();
@@ -932,17 +925,11 @@ export class PageScanner {
       return element;
     });
 
-    // DEBUG: 输出最终 <a> 元素（排查 href-less 链接是否活到最后）
-    try {
-      const finalLinks = all.filter((e) => e.type === 'a');
-      console.warn('[AA scan] final <a> elements:', finalLinks.map((e) => ({ id: e.id, text: e.text, visible: e.visible })));
-    } catch (_) { /* noop */ }
-
     // 截断策略：超过 200 个时优先保留 visible:true，再补充 visible:false 至 200
     if (all.length <= MAX_ELEMENTS) {
       return {
         elements: all,
-        truncated: false,
+        truncated: unique.length > MAX_ELEMENTS,
         regions: extractRegions(all),
         ...this.buildDiscoverySummaries(),
       };
@@ -980,12 +967,12 @@ export class PageScanner {
   } {
     return {
       page_outline: extractPageOutline(),
-      data_tables: collectDataTableData().map((t, i) => ({
+      data_tables: collectDataTableData(PREVIEW_ROWS).map((t, i) => ({
         id: `table_${String(i + 1).padStart(3, '0')}`,
         title: t.title,
         headers: t.headers,
         col_count: t.headers.length || t.rows[0]?.length || 0,
-        row_count: t.rows.length,
+        row_count: t.rowCount,
         preview: t.rows.slice(0, PREVIEW_ROWS).map(joinRow),
       })),
       charts: collectChartData().map((c, i) => ({
@@ -1245,7 +1232,7 @@ export class PageScanner {
       table_id: tableId,
       title: t.title,
       headers: t.headers,
-      row_count: t.rows.length,
+      row_count: t.rowCount,
       truncated,
       content: lines.join('\n'),
     };

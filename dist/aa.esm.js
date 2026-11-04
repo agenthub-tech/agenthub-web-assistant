@@ -3328,14 +3328,14 @@ var init_Storage = __esm({
 });
 
 // node_modules/zrender/lib/animation/requestAnimationFrame.js
-var requestAnimationFrame, requestAnimationFrame_default;
+var requestAnimationFrame2, requestAnimationFrame_default;
 var init_requestAnimationFrame = __esm({
   "node_modules/zrender/lib/animation/requestAnimationFrame.js"() {
     init_env();
-    requestAnimationFrame = env_default.hasGlobalWindow && (window.requestAnimationFrame && window.requestAnimationFrame.bind(window) || window.msRequestAnimationFrame && window.msRequestAnimationFrame.bind(window) || window.mozRequestAnimationFrame || window.webkitRequestAnimationFrame) || function(func) {
+    requestAnimationFrame2 = env_default.hasGlobalWindow && (window.requestAnimationFrame && window.requestAnimationFrame.bind(window) || window.msRequestAnimationFrame && window.msRequestAnimationFrame.bind(window) || window.mozRequestAnimationFrame || window.webkitRequestAnimationFrame) || function(func) {
       return setTimeout(func, 16);
     };
-    requestAnimationFrame_default = requestAnimationFrame;
+    requestAnimationFrame_default = requestAnimationFrame2;
   }
 });
 
@@ -81257,7 +81257,7 @@ function findTableTitle(table) {
   }
   return "";
 }
-function collectDataTableData() {
+function collectDataTableData(rowLimit = Number.POSITIVE_INFINITY) {
   const tables = Array.from(document.querySelectorAll("table"));
   const result = [];
   for (const table of tables) {
@@ -81283,7 +81283,7 @@ function collectDataTableData() {
     );
     if (bodyRows.length === 0)
       continue;
-    const rows = bodyRows.map(
+    const rows = bodyRows.slice(0, rowLimit).map(
       (tr) => Array.from(tr.children).map(
         (td) => {
           var _a2;
@@ -81295,6 +81295,7 @@ function collectDataTableData() {
       continue;
     result.push({
       table,
+      rowCount: bodyRows.length,
       title: findTableTitle(table),
       headers: computeHeaderLabels(table),
       rows
@@ -81741,65 +81742,73 @@ var PageScanner = class {
     const combined = SELECTORS.join(", ");
     const nodeList = document.querySelectorAll(combined);
     const raw = [];
+    const rawSet = /* @__PURE__ */ new Set();
+    const nativeAncestors = /* @__PURE__ */ new Set();
+    const add2 = (el) => {
+      if (rawSet.has(el))
+        return;
+      rawSet.add(el);
+      raw.push(el);
+      if (isNativeInteractive(el)) {
+        for (let parent = el.parentElement; parent; parent = parent.parentElement)
+          nativeAncestors.add(parent);
+      }
+    };
     nodeList.forEach((el) => {
       if (!isSDKElement(el)) {
-        raw.push(el);
+        add2(el);
       }
     });
-    try {
-      const links = raw.filter((e2) => e2.tagName === "A");
-      const noHref = links.filter((e2) => !e2.hasAttribute("href"));
-      if (noHref.length > 0) {
-        console.warn("[AA scan] href-less <a> collected:", noHref.map((e2) => {
-          var _a2;
-          return (_a2 = e2.textContent) == null ? void 0 : _a2.trim();
-        }));
-      }
-    } catch (_) {
-    }
     const allElements = document.querySelectorAll("div, span, li, img, svg, label, a");
     allElements.forEach((el) => {
-      if (!isSDKElement(el) && !raw.includes(el) && isClickable(el)) {
+      if (!isSDKElement(el) && !rawSet.has(el) && isClickable(el)) {
         let dominated = false;
-        for (const existing of raw) {
-          if (existing.contains(el) && existing !== el) {
-            if (existing.tagName === "TR" && isRowAction(el)) {
-              continue;
-            }
-            if (isNativeInteractive(el) && !isNativeInteractive(existing)) {
-              continue;
-            }
-            dominated = true;
-            break;
-          }
-          if (el.contains(existing) && existing !== el && isNativeInteractive(existing) && !isNativeInteractive(el)) {
-            dominated = true;
-            break;
-          }
+        for (let existing = el.parentElement; existing; existing = existing.parentElement) {
+          if (!rawSet.has(existing))
+            continue;
+          if (existing.tagName === "TR" && isRowAction(el))
+            continue;
+          if (isNativeInteractive(el) && !isNativeInteractive(existing))
+            continue;
+          dominated = true;
+          break;
         }
+        if (!isNativeInteractive(el) && nativeAncestors.has(el))
+          dominated = true;
         if (!dominated) {
-          raw.push(el);
+          add2(el);
         }
       }
     });
     const tableRows = document.querySelectorAll('tbody > tr[class*="ant-table-row"], tbody > tr[data-row-key]');
     tableRows.forEach((tr) => {
-      if (!isSDKElement(tr) && !raw.includes(tr) && isVisible(tr)) {
-        raw.push(tr);
+      if (!isSDKElement(tr) && !rawSet.has(tr) && isVisible(tr)) {
+        add2(tr);
       }
       const allDescendants = tr.querySelectorAll('a, button, [role="button"], span, div, td');
       allDescendants.forEach((actionEl) => {
         var _a2, _b2;
-        if (!isSDKElement(actionEl) && !raw.includes(actionEl) && isVisible(actionEl)) {
+        if (!isSDKElement(actionEl) && !rawSet.has(actionEl) && isVisible(actionEl)) {
           const text = (_b2 = (_a2 = actionEl.textContent) == null ? void 0 : _a2.trim()) != null ? _b2 : "";
           if (isActionText(text) && actionEl.children.length === 0) {
-            raw.push(actionEl);
+            add2(actionEl);
           }
         }
       });
     });
-    const unique = Array.from(new Set(raw));
-    const all = unique.map((el) => {
+    const unique = raw;
+    const selected = [];
+    const hidden = [];
+    for (const el of unique) {
+      if (isVisible(el))
+        selected.push(el);
+      else if (hidden.length < MAX_ELEMENTS)
+        hidden.push(el);
+      if (selected.length >= MAX_ELEMENTS)
+        break;
+    }
+    selected.push(...hidden.slice(0, MAX_ELEMENTS - selected.length));
+    const all = selected.map((el) => {
       var _a2, _b2;
       const selector2 = buildSelector(el);
       const id = `el_${stableHash(selector2)}`;
@@ -81871,15 +81880,10 @@ var PageScanner = class {
       }
       return element;
     });
-    try {
-      const finalLinks = all.filter((e2) => e2.type === "a");
-      console.warn("[AA scan] final <a> elements:", finalLinks.map((e2) => ({ id: e2.id, text: e2.text, visible: e2.visible })));
-    } catch (_) {
-    }
     if (all.length <= MAX_ELEMENTS) {
       return __spreadValues({
         elements: all,
-        truncated: false,
+        truncated: unique.length > MAX_ELEMENTS,
         regions: extractRegions(all)
       }, this.buildDiscoverySummaries());
     }
@@ -81906,14 +81910,14 @@ var PageScanner = class {
   buildDiscoverySummaries() {
     return {
       page_outline: extractPageOutline(),
-      data_tables: collectDataTableData().map((t, i) => {
+      data_tables: collectDataTableData(PREVIEW_ROWS).map((t, i) => {
         var _a2;
         return {
           id: `table_${String(i + 1).padStart(3, "0")}`,
           title: t.title,
           headers: t.headers,
           col_count: t.headers.length || ((_a2 = t.rows[0]) == null ? void 0 : _a2.length) || 0,
-          row_count: t.rows.length,
+          row_count: t.rowCount,
           preview: t.rows.slice(0, PREVIEW_ROWS).map(joinRow)
         };
       }),
@@ -82150,7 +82154,7 @@ var PageScanner = class {
       table_id: tableId,
       title: t.title,
       headers: t.headers,
-      row_count: t.rows.length,
+      row_count: t.rowCount,
       truncated,
       content: lines.join("\n")
     };
@@ -82884,6 +82888,8 @@ var ChatPanel = class {
     this.sendHandler = null;
     this.stopHandler = null;
     this.visible = false;
+    this.deltaFrame = null;
+    this.dirtyMessages = /* @__PURE__ */ new Set();
     this.pendingFiles = [];
     var _a2, _b2, _c2;
     this.primaryColor = (_a2 = theme2 == null ? void 0 : theme2.primary_color) != null ? _a2 : DEFAULT_PRIMARY_COLOR;
@@ -83142,6 +83148,25 @@ var ChatPanel = class {
       this.applyLogoUrl(theme2.logo_url);
     }
   }
+  flushDeltas() {
+    var _a2;
+    if (this.deltaFrame !== null)
+      cancelAnimationFrame(this.deltaFrame);
+    this.deltaFrame = null;
+    for (const id of this.dirtyMessages) {
+      const message = this.messages.get(id);
+      const contentEl = (_a2 = this.messageBubbles.get(id)) == null ? void 0 : _a2.querySelector("[data-aa-content]");
+      if (!message || !contentEl || !this.visible)
+        continue;
+      if (message.role === "assistant")
+        contentEl.innerHTML = renderMarkdown(message.content);
+      else
+        contentEl.textContent = message.content;
+    }
+    this.dirtyMessages.clear();
+    if (this.visible)
+      this.scrollToBottom();
+  }
   getPrimaryColor() {
     return this.primaryColor;
   }
@@ -83162,6 +83187,7 @@ var ChatPanel = class {
   }
   hide() {
     this.visible = false;
+    this.flushDeltas();
     this.panelEl.style.display = "none";
   }
   // ── Send handler ─────────────────────────────────────────────────────────────
@@ -83320,6 +83346,10 @@ var ChatPanel = class {
   }
   /** Clear all messages from the panel (used when switching threads) */
   clearMessages() {
+    if (this.deltaFrame !== null)
+      cancelAnimationFrame(this.deltaFrame);
+    this.deltaFrame = null;
+    this.dirtyMessages.clear();
     this.messages.clear();
     this.messageBubbles.clear();
     this.messageListEl.innerHTML = "";
@@ -83531,18 +83561,10 @@ var ChatPanel = class {
     message.content += delta;
     if (!this.visible)
       return;
-    const bubble = this.messageBubbles.get(messageId);
-    if (!bubble)
-      return;
-    const contentEl = bubble.querySelector("[data-aa-content]");
-    if (contentEl) {
-      if (message.role === "assistant") {
-        contentEl.innerHTML = renderMarkdown(message.content);
-      } else {
-        contentEl.textContent = message.content;
-      }
+    this.dirtyMessages.add(messageId);
+    if (this.deltaFrame === null) {
+      this.deltaFrame = requestAnimationFrame(() => this.flushDeltas());
     }
-    this.scrollToBottom();
   }
   /**
    * Replace the full content of a message bubble.
@@ -83571,6 +83593,7 @@ var ChatPanel = class {
     this.scrollToBottom();
   }
   setMessageState(messageId, state) {
+    this.flushDeltas();
     const message = this.messages.get(messageId);
     if (!message)
       return;

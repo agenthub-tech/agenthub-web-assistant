@@ -48,6 +48,9 @@ export declare class ChatPanel {
     private sendHandler;
     private stopHandler;
     private visible;
+    private deltaFrame;
+    private dirtyMessages;
+    private flushDeltas;
     private pendingFiles;
     private filePreviewEl;
     private fileInputEl;

@@ -102,6 +102,22 @@ export class ChatPanel {
   private sendHandler: ((input: string, files?: File[]) => void) | null = null;
   private stopHandler: (() => void) | null = null;
   private visible = false;
+  private deltaFrame: number | null = null;
+  private dirtyMessages = new Set<string>();
+
+  private flushDeltas(): void {
+    if (this.deltaFrame !== null) cancelAnimationFrame(this.deltaFrame);
+    this.deltaFrame = null;
+    for (const id of this.dirtyMessages) {
+      const message = this.messages.get(id);
+      const contentEl = this.messageBubbles.get(id)?.querySelector('[data-aa-content]');
+      if (!message || !contentEl || !this.visible) continue;
+      if (message.role === 'assistant') contentEl.innerHTML = renderMarkdown(message.content);
+      else contentEl.textContent = message.content;
+    }
+    this.dirtyMessages.clear();
+    if (this.visible) this.scrollToBottom();
+  }
   private pendingFiles: File[] = [];
   private filePreviewEl!: HTMLElement;
   private fileInputEl!: HTMLInputElement;
@@ -420,6 +436,7 @@ export class ChatPanel {
 
   hide(): void {
     this.visible = false;
+    this.flushDeltas();
     this.panelEl.style.display = 'none';
   }
 
@@ -601,6 +618,9 @@ export class ChatPanel {
 
   /** Clear all messages from the panel (used when switching threads) */
   clearMessages(): void {
+    if (this.deltaFrame !== null) cancelAnimationFrame(this.deltaFrame);
+    this.deltaFrame = null;
+    this.dirtyMessages.clear();
     this.messages.clear();
     this.messageBubbles.clear();
     this.messageListEl.innerHTML = '';
@@ -831,19 +851,10 @@ export class ChatPanel {
     // Only update DOM if visible
     if (!this.visible) return;
 
-    const bubble = this.messageBubbles.get(messageId);
-    if (!bubble) return;
-
-    const contentEl = bubble.querySelector('[data-aa-content]') as HTMLElement | null;
-    if (contentEl) {
-      // Synchronous DOM update — no rAF, satisfies ≤16ms requirement
-      if (message.role === 'assistant') {
-        contentEl.innerHTML = renderMarkdown(message.content);
-      } else {
-        contentEl.textContent = message.content;
-      }
+    this.dirtyMessages.add(messageId);
+    if (this.deltaFrame === null) {
+      this.deltaFrame = requestAnimationFrame(() => this.flushDeltas());
     }
-    this.scrollToBottom();
   }
 
   /**
@@ -875,6 +886,7 @@ export class ChatPanel {
   }
 
   setMessageState(messageId: string, state: MessageState): void {
+    this.flushDeltas();
     const message = this.messages.get(messageId);
     if (!message) return;
 
