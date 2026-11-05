@@ -73,6 +73,40 @@ describe('ChatPanel — 基础结构 (14.1)', () => {
 
 // ── Task 14.2: 消息气泡管理 ───────────────────────────────────────────────────
 
+describe('ChatPanel — configured dimensions', () => {
+  it.each([
+    [undefined, undefined, '360px', '520px'],
+    ['480px', '640px', '480px', '640px'],
+    ['40%', '80%', '40%', '80%'],
+    [' 420.5PX ', '75%', '420.5px', '75%'],
+    ['100%', '100%', '100%', '100%'],
+    ['0px', '-20px', '360px', '520px'],
+    ['101%', '100vh', '360px', '520px'],
+    ['360px; position: absolute', 'auto', '360px', '520px'],
+  ])('applies width %s and height %s with safe defaults', (width, height, expectedWidth, expectedHeight) => {
+    const panel = makePanel({ width, height });
+    panel.show();
+    try {
+      expect(panel.getElement().style.width).toBe(expectedWidth);
+      expect(panel.getElement().style.height).toBe(expectedHeight);
+    } finally {
+      cleanup(panel);
+    }
+  });
+
+  it.each(['bottom-left', 'bottom-right'] as const)('keeps large panels within the viewport at %s', position => {
+    const panel = new ChatPanel({ width: '2000px', height: '2000px' }, position);
+    try {
+      const style = panel.getElement().style;
+      expect(style.maxWidth).toBe('calc(100vw - 48px)');
+      expect(style.maxHeight).toBe('calc(100vh - 104px)');
+      expect(style[position === 'bottom-left' ? 'left' : 'right']).toBe('24px');
+    } finally {
+      cleanup(panel);
+    }
+  });
+});
+
 describe('ChatPanel — 消息气泡管理 (14.2)', () => {
   let panel: ChatPanel;
 

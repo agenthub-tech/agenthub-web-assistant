@@ -14,6 +14,10 @@ export interface ChatPanelTheme {
   background_color?: string;
   font_family?: string;
   welcome_message?: string | null;
+  /** Positive px or viewport % value, e.g. '360px' or '50%'. */
+  width?: string;
+  /** Positive px or viewport % value, e.g. '520px' or '80%'. */
+  height?: string;
 }
 
 export interface UITheme {

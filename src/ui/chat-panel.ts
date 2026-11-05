@@ -61,6 +61,17 @@ function isValidHexColor(color: string | undefined): color is string {
   return typeof color === 'string' && /^#[0-9A-Fa-f]{6}$/.test(color);
 }
 
+function resolveDimension(value: unknown, fallback: string): string {
+  if (typeof value !== 'string') return fallback;
+  const normalized = value.trim().toLowerCase();
+  const match = normalized.match(/^([0-9]+(?:\.[0-9]+)?|\.[0-9]+)(px|%)$/);
+  if (!match) return fallback;
+  const size = Number(match[1]);
+  return Number.isFinite(size) && size > 0 && (match[2] === 'px' || size <= 100)
+    ? normalized
+    : fallback;
+}
+
 function getContrastTextColor(color: string): '#111827' | '#F9FAFB' {
   const r = parseInt(color.slice(1, 3), 16);
   const g = parseInt(color.slice(3, 5), 16);
@@ -153,8 +164,11 @@ export class ChatPanel {
       position: fixed;
       bottom: 80px;
       ${hAlign}
-      width: 360px;
-      height: 520px;
+      width: ${resolveDimension(theme?.width, '360px')};
+      height: ${resolveDimension(theme?.height, '520px')};
+      max-width: calc(100vw - 48px);
+      max-height: calc(100vh - 104px);
+      box-sizing: border-box;
       z-index: 10000;
       display: none;
       flex-direction: column;
