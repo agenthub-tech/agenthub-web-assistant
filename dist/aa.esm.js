@@ -82619,7 +82619,9 @@ var VirtualMouse = class {
 // src/ui/float-button.ts
 var DEFAULT_CONFIG = {
   position: "bottom-right",
-  color: "#6366F1"
+  color: "#6366F1",
+  background_transparent: false,
+  shadow_enabled: false
 };
 var AA_ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 28 28" fill="none">
   <rect x="2" y="6" width="24" height="16" rx="4" fill="white" opacity="0.9"/>
@@ -82634,9 +82636,8 @@ function injectPulseStyles() {
   style.setAttribute("data-aa-sdk", "true");
   style.textContent = `
 @keyframes aa-pulse {
-  0%   { box-shadow: 0 0 0 0 rgba(99, 102, 241, 0.6); }
-  70%  { box-shadow: 0 0 0 12px rgba(99, 102, 241, 0); }
-  100% { box-shadow: 0 0 0 0 rgba(99, 102, 241, 0); }
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.65; }
 }
 .aa-float-btn-pulse {
   animation: aa-pulse 1.4s ease-in-out infinite;
@@ -82676,12 +82677,14 @@ var FloatButton = class {
       justify-content: center;
       padding: 0;
       outline: none;
-      transition: transform 0.15s ease, box-shadow 0.15s ease;
+      transition: transform 0.15s ease, filter 0.15s ease;
+      box-shadow: none;
       bottom: 24px;
     `;
   }
   applyConfig(config) {
-    this.el.style.backgroundColor = config.color;
+    this.el.style.background = config.background_transparent ? "transparent" : config.color;
+    this.el.style.filter = config.shadow_enabled ? "drop-shadow(0 4px 8px rgba(0,0,0,0.24))" : "none";
     if (config.position === "bottom-left") {
       this.el.style.left = "24px";
       this.el.style.right = "";
@@ -82950,14 +82953,13 @@ var ChatPanel = class {
     this.logoEl.innerHTML = AA_LOGO_SVG;
     const titleEl = document.createElement("span");
     titleEl.setAttribute("data-aa-sdk", "true");
-    titleEl.style.cssText = `font-size:15px;font-weight:600;color:#ffffff;font-family:${this.fontFamily};min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;`;
+    titleEl.style.cssText = `font-size:15px;font-weight:600;color:#ffffff;font-family:${this.fontFamily};flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;`;
     titleEl.textContent = ((_c2 = theme2 == null ? void 0 : theme2.title) == null ? void 0 : _c2.trim()) || "AA \u52A9\u624B";
     titleEl.title = titleEl.textContent;
     this.threadToggleBtn = document.createElement("button");
     this.threadToggleBtn.setAttribute("data-aa-sdk", "true");
     this.threadToggleBtn.setAttribute("aria-label", "\u4F1A\u8BDD\u5217\u8868");
     this.threadToggleBtn.style.cssText = `
-      margin-left: auto;
       flex-shrink: 0;
       background: none;
       border: none;
@@ -82977,9 +82979,36 @@ var ChatPanel = class {
       this.threadToggleBtn.style.background = "none";
     });
     this.threadToggleBtn.addEventListener("click", () => this.toggleThreadList());
+    const closeBtn = document.createElement("button");
+    closeBtn.type = "button";
+    closeBtn.setAttribute("data-aa-sdk", "true");
+    closeBtn.setAttribute("aria-label", "\u5173\u95ED\u5BF9\u8BDD\u6846");
+    closeBtn.title = "\u5173\u95ED";
+    closeBtn.style.cssText = `
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      background: none;
+      color: #ffffff;
+      border: none;
+      border-radius: 6px;
+      padding: 4px;
+      cursor: pointer;
+      transition: background 0.15s ease;
+    `;
+    closeBtn.innerHTML = `<svg data-aa-sdk="true" width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true"><path d="M4 4L14 14M14 4L4 14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>`;
+    closeBtn.addEventListener("mouseenter", () => {
+      closeBtn.style.background = "rgba(255,255,255,0.15)";
+    });
+    closeBtn.addEventListener("mouseleave", () => {
+      closeBtn.style.background = "none";
+    });
+    closeBtn.addEventListener("click", () => this.hide());
     this.headerEl.appendChild(this.logoEl);
     this.headerEl.appendChild(titleEl);
     this.headerEl.appendChild(this.threadToggleBtn);
+    this.headerEl.appendChild(closeBtn);
     this.threadListEl = document.createElement("div");
     this.threadListEl.setAttribute("data-aa-sdk", "true");
     this.threadListEl.style.cssText = `

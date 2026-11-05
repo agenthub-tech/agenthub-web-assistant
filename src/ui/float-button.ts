@@ -5,6 +5,8 @@ export interface FloatButtonConfig {
   position: 'bottom-right' | 'bottom-left';
   color: string;
   icon_url?: string;
+  background_transparent?: boolean;
+  shadow_enabled?: boolean;
 }
 
 export type FloatButtonState = 'open' | 'closed' | 'running';
@@ -12,6 +14,8 @@ export type FloatButtonState = 'open' | 'closed' | 'running';
 const DEFAULT_CONFIG: FloatButtonConfig = {
   position: 'bottom-right',
   color: '#6366F1',
+  background_transparent: false,
+  shadow_enabled: false,
 };
 
 const AA_ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 28 28" fill="none">
@@ -28,9 +32,8 @@ function injectPulseStyles(): void {
   style.setAttribute('data-aa-sdk', 'true');
   style.textContent = `
 @keyframes aa-pulse {
-  0%   { box-shadow: 0 0 0 0 rgba(99, 102, 241, 0.6); }
-  70%  { box-shadow: 0 0 0 12px rgba(99, 102, 241, 0); }
-  100% { box-shadow: 0 0 0 0 rgba(99, 102, 241, 0); }
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.65; }
 }
 .aa-float-btn-pulse {
   animation: aa-pulse 1.4s ease-in-out infinite;
@@ -82,14 +85,16 @@ export class FloatButton {
       justify-content: center;
       padding: 0;
       outline: none;
-      transition: transform 0.15s ease, box-shadow 0.15s ease;
+      transition: transform 0.15s ease, filter 0.15s ease;
+      box-shadow: none;
       bottom: 24px;
     `;
   }
 
   private applyConfig(config: FloatButtonConfig): void {
-    // Apply color
-    this.el.style.backgroundColor = config.color;
+    // Drop shadows follow the visible icon when its background is transparent.
+    this.el.style.background = config.background_transparent ? 'transparent' : config.color;
+    this.el.style.filter = config.shadow_enabled ? 'drop-shadow(0 4px 8px rgba(0,0,0,0.24))' : 'none';
 
     // Apply position
     if (config.position === 'bottom-left') {

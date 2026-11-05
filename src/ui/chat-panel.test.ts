@@ -42,6 +42,22 @@ describe('ChatPanel — 基础结构 (14.1)', () => {
     expect(panel.getElement().style.display).toBe('none');
   });
 
+  it('关闭面板保留消息且不停止正在执行的任务', () => {
+    const stop = vi.fn();
+    panel.onStop(stop);
+    panel.show();
+    panel.showStopButton();
+    const id = panel.addMessage('assistant', 'streaming');
+    panel.appendDelta(id, '关闭前');
+    panel.enableThreadList();
+    panel.getElement().querySelector<HTMLButtonElement>('button[aria-label="关闭对话框"]')!.click();
+    expect(panel.getElement().style.display).toBe('none');
+    expect(stop).not.toHaveBeenCalled();
+    panel.appendDelta(id, '关闭后');
+    panel.show();
+    expect(panel.getMessageListEl().textContent).toContain('关闭前关闭后');
+  });
+
   it('面板包含消息列表、输入框、发送按钮', () => {
     expect(panel.getMessageListEl()).not.toBeNull();
     expect(panel.getElement().querySelector('textarea[data-aa-sdk="true"]')).not.toBeNull();

@@ -3,7 +3,11 @@ import { init } from '../core/init';
 
 const config = vi.hoisted(() => ({
   ui_theme: {
-    float_button: { position: 'bottom-right', color: '#1677ff', icon_url: null as string | null },
+    float_button: {
+      position: 'bottom-right', color: '#1677ff', icon_url: null as string | null,
+      background_transparent: undefined as boolean | undefined,
+      shadow_enabled: undefined as boolean | undefined,
+    },
     chat_panel: { primary_color: '#1677ff', logo_url: null as string | null },
   },
 }));
@@ -26,6 +30,8 @@ describe('configured assistant logos', () => {
     document.body.replaceChildren();
     sessionStorage.clear();
     config.ui_theme.float_button.icon_url = null;
+    config.ui_theme.float_button.background_transparent = undefined;
+    config.ui_theme.float_button.shadow_enabled = undefined;
     config.ui_theme.chat_panel.logo_url = 'https://example.com/logo.png';
     vi.stubGlobal('MutationObserver', class { observe() {} disconnect() {} });
   });
@@ -67,5 +73,37 @@ describe('configured assistant logos', () => {
     await init({ channelKey: 'test', apiBase: 'https://example.com' });
     expect(document.querySelector('button[aria-label="AA 助手"] img')).toBeNull();
     expect(document.querySelector('img[alt="Logo"]')).toBeNull();
+  });
+
+  it.each([
+    [undefined, undefined],
+    [false, false],
+    [false, true],
+    [true, false],
+    [true, true],
+  ])('loads independent icon background and shadow settings (%s, %s)', async (transparent, shadow) => {
+    config.ui_theme.float_button.background_transparent = transparent;
+    config.ui_theme.float_button.shadow_enabled = shadow;
+    await init({ channelKey: 'test', apiBase: 'https://example.com' });
+    const button = document.querySelector<HTMLButtonElement>('button[aria-label="AA 助手"]')!;
+    expect(button.style.backgroundColor).toBe(transparent ? 'transparent' : 'rgb(22, 119, 255)');
+    expect(button.style.filter).toBe(shadow ? 'drop-shadow(0 4px 8px rgba(0,0,0,0.24))' : 'none');
+    expect(button.querySelector('img')?.getAttribute('src')).toBe(config.ui_theme.chat_panel.logo_url);
+  });
+
+  it('reopens the same conversation from the floating icon after closing the panel', async () => {
+    await init({ channelKey: 'test', apiBase: 'https://example.com' });
+    const button = document.querySelector<HTMLButtonElement>('button[aria-label="AA 助手"]')!;
+    const close = document.querySelector<HTMLButtonElement>('button[aria-label="关闭对话框"]')!;
+    const panel = close.parentElement!.parentElement!;
+    const input = panel.querySelector('textarea')!;
+    button.click();
+    input.value = '未发送的草稿';
+    close.click();
+    expect(panel.style.display).toBe('none');
+    button.click();
+    expect(panel.style.display).toBe('flex');
+    expect(panel.querySelector('textarea')).toBe(input);
+    expect(input.value).toBe('未发送的草稿');
   });
 });

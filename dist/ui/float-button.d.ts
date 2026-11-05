@@ -2,6 +2,8 @@ export interface FloatButtonConfig {
     position: 'bottom-right' | 'bottom-left';
     color: string;
     icon_url?: string;
+    background_transparent?: boolean;
+    shadow_enabled?: boolean;
 }
 export type FloatButtonState = 'open' | 'closed' | 'running';
 export declare class FloatButton {

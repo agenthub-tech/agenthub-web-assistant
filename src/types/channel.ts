@@ -5,6 +5,8 @@ export interface FloatButtonTheme {
   position: 'bottom-right' | 'bottom-left';
   color: string;
   icon_url?: string;
+  background_transparent?: boolean;
+  shadow_enabled?: boolean;
 }
 
 export interface ChatPanelTheme {
