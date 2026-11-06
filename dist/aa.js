@@ -50,9 +50,9 @@
     mod
   ));
 
-  // node_modules/events/events.js
+  // ../../sdks/js/node_modules/events/events.js
   var require_events = __commonJS({
-    "node_modules/events/events.js"(exports, module) {
+    "../../sdks/js/node_modules/events/events.js"(exports, module) {
       "use strict";
       var R = typeof Reflect === "object" ? Reflect : null;
       var ReflectApply = R && typeof R.apply === "function" ? R.apply : function ReflectApply2(target, receiver, args) {
@@ -80270,9 +80270,6 @@
       this._runId = null;
       this._threadId = null;
       this._userId = null;
-      this._userAccount = null;
-      this._sourceSessionToken = null;
-      this._pendingSourceRevocations = /* @__PURE__ */ new Map();
       this._skills = /* @__PURE__ */ new Map();
       this._localSkills = /* @__PURE__ */ new Map();
       this._apiBase = "";
@@ -80582,16 +80579,16 @@
           }
           response = await fetch(`${this._apiBase}/api/agent/run`, {
             method: "POST",
-            headers: __spreadValues({ "Authorization": `Bearer ${this._accessToken}` }, this._sourceSessionToken ? { "X-AgentHub-Source-Session": this._sourceSessionToken } : {}),
+            headers: { "Authorization": `Bearer ${this._accessToken}` },
             body: formData
           });
         } else {
           response = await fetch(`${this._apiBase}/api/agent/run`, {
             method: "POST",
-            headers: __spreadValues({
+            headers: {
               "Content-Type": "application/json",
               "Authorization": `Bearer ${this._accessToken}`
-            }, this._sourceSessionToken ? { "X-AgentHub-Source-Session": this._sourceSessionToken } : {}),
+            },
             body: JSON.stringify(body)
           });
         }
@@ -80832,20 +80829,8 @@
      * Identify the current end user.
      */
     async identify(user) {
-      var _a2, _b2, _c2, _d, _e;
-      if (!this._sourceSessionToken && this._pendingSourceRevocations.size)
-        await this.revokeSourceSession();
-      if (this._sourceSessionToken && (this._userId !== user.userId || user.account !== void 0 && this._userAccount !== user.account || user.sourceSessionToken && user.sourceSessionToken !== this._sourceSessionToken)) {
-        this.disconnect();
-        this._runId = null;
-        this._threadId = null;
-        await this.revokeSourceSession("ACCOUNT_SWITCH");
-        this._disconnected = false;
-      }
-      this._userAccount = (_a2 = user.account) != null ? _a2 : this._userId === user.userId ? this._userAccount : null;
+      var _a2, _b2, _c2, _d;
       this._userId = user.userId;
-      if (user.sourceSessionToken)
-        this._sourceSessionToken = user.sourceSessionToken;
       this._disconnected = false;
       if (!this._accessToken)
         return;
@@ -80856,10 +80841,10 @@
         },
         body: JSON.stringify({
           user_id: user.userId,
-          account: (_b2 = user.account) != null ? _b2 : null,
-          name: (_c2 = user.name) != null ? _c2 : null,
-          avatar: (_d = user.avatar) != null ? _d : null,
-          metadata: (_e = user.metadata) != null ? _e : {}
+          account: (_a2 = user.account) != null ? _a2 : null,
+          name: (_b2 = user.name) != null ? _b2 : null,
+          avatar: (_c2 = user.avatar) != null ? _c2 : null,
+          metadata: (_d = user.metadata) != null ? _d : {}
         })
       });
       if (!response.ok) {
@@ -80979,9 +80964,7 @@
     reset() {
       this._log("reset");
       this.disconnect();
-      void this.revokeSourceSession("LOGOUT").catch(() => console.warn("\u6765\u6E90\u4F1A\u8BDD\u64A4\u9500\u672A\u786E\u8BA4\uFF1B\u4E1A\u52A1\u540E\u7AEF\u5E94\u91CD\u8BD5\u9000\u51FA\u901A\u77E5"));
       this._userId = null;
-      this._userAccount = null;
       this._runId = null;
       this._threadId = null;
       this._disconnected = false;
@@ -80995,42 +80978,6 @@
     }
     onReset(callback) {
       this._onResetCallbacks.push(callback);
-    }
-    /** Verify a fresh business-backend proof and bind this SDK to its login session. */
-    async authenticateSource(identityAssertion, integrationId) {
-      const response = await this._fetchWithAuthRetry(`${this._apiBase}/api/sdk/mcp/source-session`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ identity_assertion: identityAssertion, integration_id: integrationId })
-      });
-      if (!response.ok)
-        throw new Error(`\u6765\u6E90\u8EAB\u4EFD\u8BA4\u8BC1\u5931\u8D25 (${response.status})`);
-      const session = await response.json();
-      if (typeof session.session_token !== "string" || typeof session.source_subject !== "string")
-        throw new Error("\u6765\u6E90\u8EAB\u4EFD\u54CD\u5E94\u65E0\u6548");
-      await this.identify({ userId: session.source_subject, sourceSessionToken: session.session_token });
-    }
-    /** Call from business logout/account-switch handling; await acknowledgment. */
-    async revokeSourceSession(reason = "LOGOUT") {
-      const token = this._sourceSessionToken;
-      this._sourceSessionToken = null;
-      if (token) {
-        this.disconnect();
-        this._runId = null;
-        this._threadId = null;
-        this._pendingSourceRevocations.set(token, reason);
-      }
-      for (const [pendingToken, pendingReason] of this._pendingSourceRevocations) {
-        const response = await this._fetchWithAuthRetry(`${this._apiBase}/api/sdk/mcp/source-session/revoke`, {
-          method: "POST",
-          keepalive: true,
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ session_token: pendingToken, reason: pendingReason })
-        });
-        if (!response.ok)
-          throw new Error(`\u6765\u6E90\u4F1A\u8BDD\u64A4\u9500\u672A\u786E\u8BA4 (${response.status})`);
-        this._pendingSourceRevocations.delete(pendingToken);
-      }
     }
     // ── Built-in Skill Handlers ─────────────────────────────────────────────────
     _registerBuiltinSkillHandlers() {
