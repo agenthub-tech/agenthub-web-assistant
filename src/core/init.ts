@@ -429,6 +429,8 @@ function wireEmitterToUI(
   });
 
   emitter.on('TextMessageStart', () => {
+    // Internal plan calls have no public tool event to close the prior preamble.
+    if (currentMsgId !== null) chatPanel.setMessageState(currentMsgId, 'done');
     currentMsgId = chatPanel.addMessage('assistant', 'streaming');
   });
 

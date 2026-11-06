@@ -22,8 +22,8 @@ export const TOOL_LABEL_MAP: Record<string, string> = {
   knowledge_skill:  '正在查找相关内容',
 };
 
-// 不在步骤面板显示的 skill
-const HIDDEN_SKILLS = new Set(['page_skill', 'wait_skill']);
+// 内部操作不展示；也兼容旧后端事件和历史会话中的计划工具记录。
+const HIDDEN_SKILLS = new Set(['page_skill', 'wait_skill', 'update_plan']);
 
 const SPINNER_SVG = `<svg data-aa-sdk="true" width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg" style="animation:aa-spin 0.8s linear infinite;flex-shrink:0;">
   <circle cx="7" cy="7" r="5.5" stroke="#6366F1" stroke-width="2" stroke-dasharray="20 14" stroke-linecap="round"/>

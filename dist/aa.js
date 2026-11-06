@@ -84009,7 +84009,7 @@
     clipboard_skill: "\u8BFB\u5199\u526A\u8D34\u677F",
     knowledge_skill: "\u6B63\u5728\u67E5\u627E\u76F8\u5173\u5185\u5BB9"
   };
-  var HIDDEN_SKILLS = /* @__PURE__ */ new Set(["page_skill", "wait_skill"]);
+  var HIDDEN_SKILLS = /* @__PURE__ */ new Set(["page_skill", "wait_skill", "update_plan"]);
   var SPINNER_SVG = `<svg data-aa-sdk="true" width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg" style="animation:aa-spin 0.8s linear infinite;flex-shrink:0;">
   <circle cx="7" cy="7" r="5.5" stroke="#6366F1" stroke-width="2" stroke-dasharray="20 14" stroke-linecap="round"/>
 </svg>`;
@@ -84970,6 +84970,8 @@
       floatButton.setState("closed");
     });
     emitter.on("TextMessageStart", () => {
+      if (currentMsgId !== null)
+        chatPanel.setMessageState(currentMsgId, "done");
       currentMsgId = chatPanel.addMessage("assistant", "streaming");
     });
     emitter.on("TextMessageDelta", (event) => {
